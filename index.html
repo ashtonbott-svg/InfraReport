@@ -1,0 +1,26 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <!--
+    viewport-fit=cover keeps the canvas edge to edge on notched iPhones.
+    maximum-scale and user-scalable are set because the browser's own pinch
+    zoom would fight the game's camera. Modern iOS Safari ignores these hints,
+    which is why `touch-action: none` in the stylesheet is the real defence.
+  -->
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover" />
+  <title>GRIDLOCK</title>
+  <link rel="stylesheet" href="css/style.css" />
+</head>
+<body>
+  <!--
+    The canvas is the entire game surface. All world rendering happens here.
+    Any future HTML based UI (stats panels, tool buttons) will be layered
+    on top of this canvas as sibling elements, never drawn inside it,
+    so that simulation rendering and UI stay separated.
+  -->
+  <canvas id="game-canvas"></canvas>
+
+  <script type="module" src="js/main.js"></script>
+</body>
+</html>
