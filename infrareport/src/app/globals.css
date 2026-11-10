@@ -1,0 +1,39 @@
+@import "tailwindcss";
+
+@theme inline {
+  --font-sans: var(--font-inter), ui-sans-serif, system-ui, sans-serif;
+  --font-mono: var(--font-jetbrains), ui-monospace, monospace;
+}
+
+@theme {
+  --color-thermal-50: #fff6ed;
+  --color-thermal-100: #ffead4;
+  --color-thermal-200: #ffd0a8;
+  --color-thermal-300: #ffad71;
+  --color-thermal-400: #fd7f38;
+  --color-thermal-500: #f65d12;
+  --color-thermal-600: #e44408;
+  --color-thermal-700: #bd3109;
+  --color-thermal-800: #962910;
+  --color-thermal-900: #792411;
+  --shadow-xs: 0 1px 2px 0 rgb(15 23 42 / 0.04);
+}
+
+/* InfraReport is a light-workspace application by design; the charcoal
+   navigation provides contrast. A dark theme can be added later. */
+html { color-scheme: light; }
+body {
+  background: #f6f7f9;
+  color: #0f172a;
+}
+
+/* Compact grid inputs for the equipment entry workspace */
+.grid-input {
+  @apply h-8 w-full min-w-0 rounded border border-transparent bg-transparent px-2 text-sm text-slate-900 placeholder:text-slate-400 hover:border-slate-200 focus:border-thermal-500 focus:bg-white focus:outline-none focus:ring-2 focus:ring-thermal-500/20;
+}
+.grid-input.inherited { @apply italic text-slate-500; }
+select.grid-input { @apply pr-6; }
+
+@media print {
+  .no-print { display: none !important; }
+}
