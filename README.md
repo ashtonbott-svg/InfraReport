@@ -18,9 +18,10 @@ npm run build
 
 ## Deploy (Vercel)
 
-Vercel project `infrareport-prototype`, imported from this GitHub repository with
-**Root Directory = `infrareport`**. Framework preset Next.js, default build settings.
-Every push to the production branch redeploys automatically.
+Deployed by the Vercel project connected to this repository. The app lives at the
+repository root; `vercel.json` pins the framework to Next.js so the build does not
+depend on the project's dashboard preset. Every push to the production branch
+redeploys automatically; other branches get preview deployments.
 
 ## What works
 
