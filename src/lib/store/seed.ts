@@ -5,6 +5,7 @@
  */
 import { DEFAULT_EMISSIVITY, DEFAULT_OPENED, POSSIBLE_CAUSE_NONE } from "../domain/constants";
 import { EMPTY_OVERRIDES, defaultComponentForType } from "../domain/rules";
+import { newSiteVisit } from "../domain/site-visit";
 import type {
   Customer,
   Equipment,
@@ -95,9 +96,9 @@ export function buildSeed(): SeedData {
   ];
 
   const inspections: Inspection[] = [
-    { id: "insp-1", organizationId: ORG, customerId: "cust-1", facilityId: "fac-1", date: "2025-03-11", inspectorId: "user-1", status: "Delivered", defaultEmissivity: DEFAULT_EMISSIVITY, notes: "Prior year inspection (fictional).", createdAt: "2025-03-11T14:00:00.000Z", updatedAt: "2025-03-20T14:00:00.000Z" },
-    { id: "insp-2", organizationId: ORG, customerId: "cust-1", facilityId: "fac-1", date: "2026-03-10", inspectorId: "user-1", status: "In Progress", defaultEmissivity: DEFAULT_EMISSIVITY, notes: "", createdAt: "2026-03-10T13:00:00.000Z", updatedAt: "2026-03-10T19:00:00.000Z" },
-    { id: "insp-3", organizationId: ORG, customerId: "cust-2", facilityId: "fac-2", date: "2026-04-02", inspectorId: "user-2", status: "Draft", defaultEmissivity: DEFAULT_EMISSIVITY, notes: "", createdAt: "2026-03-28T13:00:00.000Z", updatedAt: "2026-03-28T13:00:00.000Z" },
+    { id: "insp-1", organizationId: ORG, customerId: "cust-1", facilityId: "fac-1", date: "2025-03-11", inspectorId: "user-1", status: "Delivered", defaultEmissivity: DEFAULT_EMISSIVITY, notes: "Prior year inspection (fictional).", createdAt: "2025-03-11T14:00:00.000Z", updatedAt: "2025-03-20T14:00:00.000Z", siteVisit: { ...newSiteVisit(), state: "completed", sessions: [{ startedAt: "2025-03-11T13:00:00.000Z", endedAt: "2025-03-11T21:00:00.000Z" }], completedAt: "2025-03-11T21:00:00.000Z" } },
+    { id: "insp-2", organizationId: ORG, customerId: "cust-1", facilityId: "fac-1", date: "2026-03-10", inspectorId: "user-1", status: "In Progress", defaultEmissivity: DEFAULT_EMISSIVITY, notes: "", createdAt: "2026-03-10T13:00:00.000Z", updatedAt: "2026-03-10T19:00:00.000Z", siteVisit: newSiteVisit() },
+    { id: "insp-3", organizationId: ORG, customerId: "cust-2", facilityId: "fac-2", date: "2026-04-02", inspectorId: "user-2", status: "Draft", defaultEmissivity: DEFAULT_EMISSIVITY, notes: "", createdAt: "2026-03-28T13:00:00.000Z", updatedAt: "2026-03-28T13:00:00.000Z", siteVisit: newSiteVisit() },
   ];
 
   const room = (id: string, inspectionId: string, locationId: string, humidity: string, ambient: string, background: string, distance: string): InspectionRoomConditions => ({

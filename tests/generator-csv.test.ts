@@ -4,6 +4,7 @@ import {
 } from "@/lib/domain/csv";
 import { DEFAULT_EMISSIVITY, OPENED_VALUES, POSSIBLE_CAUSE_NONE } from "@/lib/domain/constants";
 import { EMPTY_OVERRIDES } from "@/lib/domain/rules";
+import { newSiteVisit } from "@/lib/domain/site-visit";
 import type { Equipment, Inspection, InspectionResult, InspectionRoomConditions, Location } from "@/lib/domain/types";
 
 const EXPECTED = [
@@ -11,7 +12,7 @@ const EXPECTED = [
   "IR Image Number", "Visual Image Number", "Emissivity", "Max Temp", "Ambient Temp", "Opened", "Confidence", "Review Notes",
 ];
 
-const insp: Inspection = { id: "i1", organizationId: "o", customerId: "c", facilityId: "f", date: "2026-03-10", inspectorId: "u", status: "In Progress", defaultEmissivity: DEFAULT_EMISSIVITY, notes: "", createdAt: "", updatedAt: "" };
+const insp: Inspection = { id: "i1", organizationId: "o", customerId: "c", facilityId: "f", date: "2026-03-10", inspectorId: "u", status: "In Progress", defaultEmissivity: DEFAULT_EMISSIVITY, notes: "", createdAt: "", updatedAt: "", siteVisit: newSiteVisit() };
 const loc1: Location = { id: "l1", organizationId: "o", facilityId: "f", building: "", name: "Electrical Room 1", area: "", sortOrder: 1 };
 const loc2: Location = { id: "l2", organizationId: "o", facilityId: "f", building: "Building B", name: "MCC Room", area: "", sortOrder: 2 };
 const room1: InspectionRoomConditions = { id: "rc1", organizationId: "o", inspectionId: "i1", locationId: "l1", humidity: "45", ambientTemp: "74", backgroundTemp: "73", distance: "4", imageDate: "" };

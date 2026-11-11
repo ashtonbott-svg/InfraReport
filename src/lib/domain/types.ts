@@ -119,6 +119,25 @@ export interface Inspection {
   notes: string;
   createdAt: ISODateTime;
   updatedAt: ISODateTime;
+  /** Field workflow state. Separate from the review status above. */
+  siteVisit: SiteVisit;
+}
+
+export type SiteVisitState = "not-started" | "active" | "paused" | "completed";
+
+/** One on-site work period (a day, or part of a day). */
+export interface VisitSession {
+  startedAt: ISODateTime;
+  endedAt: ISODateTime | null;
+}
+
+export interface SiteVisit {
+  state: SiteVisitState;
+  sessions: VisitSession[];
+  lastActiveLocationId: ID | null;
+  /** True once the inspector chose "Skip for Now" on the initial exterior photo prompt. */
+  skippedExteriorPrompt: boolean;
+  completedAt: ISODateTime | null;
 }
 
 /** Environmental defaults for one room during one inspection. */
@@ -186,6 +205,29 @@ export interface ImageAsset {
   kind: ImageKind;
   matchedResultId: ID | null;
   verified: boolean;
+}
+
+export type PhotoKind = "exterior" | "equipment";
+
+/**
+ * A photo captured or uploaded from the inspector's device. The binary lives in
+ * IndexedDB (never localStorage); this record is only created after the binary
+ * write has been verified, so a Photo row always means "saved on this device".
+ */
+export interface Photo {
+  id: ID;
+  organizationId: ID;
+  inspectionId: ID;
+  facilityId: ID;
+  kind: PhotoKind;
+  /** Building key for exterior photos ("" = main building / no building name). */
+  building: string;
+  resultId: ID | null;
+  fileName: string;
+  mimeType: string;
+  sizeBytes: number;
+  capturedAt: ISODateTime;
+  savedAt: ISODateTime;
 }
 
 export type DocumentKind = "field-notes" | "report" | "workbook" | "other";

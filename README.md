@@ -12,7 +12,7 @@ Electrical infrared inspection management and reporting. Prototype build.
 ```bash
 npm install
 npm run dev        # http://localhost:3000
-npm test           # 36 unit + workflow tests (CSV layout, rules, store workflow)
+npm test           # 51 tests: CSV layout + golden export, rules, store workflow, site visits, photo storage
 npm run build
 ```
 
@@ -35,6 +35,18 @@ redeploys automatically; other branches get preview deployments.
 | Field notes upload and preview | Functional, session only; AI extraction **not connected** |
 | Image number matching | Functional from file names; images **not stored** |
 | Excel workbook population, PDF report | Not built (needs the real Generator workbook) |
+| Mobile field mode: active inspection, room switcher, add room sheet, equipment cards and editor, thumb-reach action bar | Functional |
+| Building exterior photo (camera / upload, per building, required to pause or finish) | Functional, stored on this device only |
+| Pause / resume across days, Resume Inspection on dashboard | Functional on the same device and browser |
+| Offline use after first load (service worker) | Functional; nothing syncs because there is no server yet |
+
+### Storage limits (prototype)
+
+Records are saved to localStorage on every change; photos are saved to IndexedDB
+and only counted once the write is verified. Both live in one browser on one
+device: no cross-device resume, no backup unless you export one in Settings, and
+iOS may clear site data for web apps that are not added to the Home Screen and go
+unused for weeks. Add InfraReport to the Home Screen on field devices.
 
 ## Code map
 

@@ -12,6 +12,7 @@ import { CustomerFormModal, FacilityFormModal } from "@/components/forms/entity-
 import { toast } from "@/components/ui/toast";
 import { useCustomers, useEquipment, useFacilities, useInspections, useLocations, useUsers } from "@/lib/store/hooks";
 import { useStore } from "@/lib/store/store";
+import { useBeginFieldWork } from "@/lib/store/field-actions";
 import { formatDate, plural, todayISO } from "@/lib/format";
 
 function NewInspectionForm() {
@@ -25,6 +26,8 @@ function NewInspectionForm() {
   const users = useUsers();
   const currentUserId = useStore((s) => s.currentUserId);
   const createInspection = useStore((s) => s.createInspection);
+  const begin = useBeginFieldWork();
+  const activeId = useStore((s) => s.activeInspectionId);
 
   const [customerId, setCustomerId] = useState(params.get("customer") ?? "");
   const [facilityChoice, setFacilityId] = useState(params.get("facility") ?? "");
@@ -32,6 +35,7 @@ function NewInspectionForm() {
   const [inspectorId, setInspectorId] = useState(currentUserId);
   const [carryForward, setCarryForward] = useState(true);
   const [notes, setNotes] = useState("");
+  const [startNow, setStartNow] = useState(true);
   const [newCust, setNewCust] = useState(false);
   const [newFac, setNewFac] = useState(false);
 
@@ -49,7 +53,8 @@ function NewInspectionForm() {
     if (!valid) return;
     const id = createInspection({ customerId, facilityId, date, inspectorId, carryForward: carryForward && eqCount + roomCount > 0, notes });
     toast("Inspection created");
-    router.push(`/inspections/${id}/entry`);
+    if (startNow && !activeId) begin(id);
+    else router.push(`/inspections/${id}/entry`);
   };
 
   return (
@@ -104,7 +109,11 @@ function NewInspectionForm() {
               )}
             </CardBody>
           </Card>
-          <Button variant="primary" size="lg" type="submit" className="w-full justify-center" disabled={!valid}>Create & start entry<ArrowRight className="h-4 w-4" /></Button>
+          <label className="flex cursor-pointer items-start gap-2.5 rounded-md border border-slate-200 bg-white p-3 text-sm hover:bg-slate-50">
+            <input type="checkbox" className="mt-0.5 h-5 w-5 accent-thermal-600" checked={startNow} onChange={(e) => setStartNow(e.target.checked)} />
+            <span><span className="font-medium text-slate-900">I&apos;m on site now</span><br /><span className="text-xs text-slate-500">Starts the site visit and asks for the building exterior photo. Leave unchecked to prepare the job in advance.</span></span>
+          </label>
+          <Button variant="primary" size="lg" type="submit" className="h-12 w-full justify-center text-base" disabled={!valid}>{startNow ? "Create & Start Site Visit" : "Create Inspection"}<ArrowRight className="h-4 w-4" /></Button>
         </div>
       </form>
       <CustomerFormModal open={newCust} onClose={() => setNewCust(false)} onSaved={(id) => { setCustomerId(id); setFacilityId(""); }} />

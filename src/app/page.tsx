@@ -8,6 +8,7 @@ import { Card, CardBody, CardHeader } from "@/components/ui/card";
 import { StatusBadge } from "@/components/ui/badge";
 import { EmptyState, PageHeader, Stat, Table, td, th } from "@/components/ui/misc";
 import { INSPECTION_STATUSES } from "@/lib/domain/constants";
+import { ResumeInspections } from "@/components/field/resume-card";
 import { formatDate, formatDateTime, plural } from "@/lib/format";
 import {
   useCustomers, useEquipment, useFacilities, useInspections, useResults, useReviewEvents, useUsers,
@@ -46,6 +47,8 @@ export default function DashboardPage() {
           <Link href="/inspections/new"><Button variant="primary"><Plus className="h-4 w-4" />New Inspection</Button></Link>
         }
       />
+
+      <ResumeInspections />
 
       <div className="grid grid-cols-2 gap-3 lg:grid-cols-4">
         <Stat label="Open inspections" value={active.length} sub={`${byStatus.get("Needs Review") ?? 0} need review`} icon={<ClipboardList className="h-4 w-4" />} />

@@ -31,7 +31,7 @@ export function InspectionHeader({ inspection, errorCount }: { inspection: Inspe
       toast(`Resolve ${errorCount} validation error${errorCount === 1 ? "" : "s"} before approval`, "error");
       return;
     }
-    setStatus(inspection.id, s);
+    if (!setStatus(inspection.id, s)) { toast("Building exterior photo required before review", "error"); return; }
     toast(`Status set to ${s}`);
   };
 

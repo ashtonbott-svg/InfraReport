@@ -16,6 +16,8 @@ import { countBySeverity, type Severity } from "@/lib/domain/validation";
 import { GENERATOR_COLUMNS, GENERATOR_HEADERS, buildGeneratorRows, exportFileName, parseCsv, toCsv } from "@/lib/domain/csv";
 import { downloadText } from "@/lib/download";
 import { cn } from "@/lib/cn";
+import { ExteriorCapture, useFieldState } from "@/components/field/exterior-photos";
+import { buildingLabel } from "@/lib/domain/site-visit";
 
 const sevIcon: Record<Severity, React.ReactNode> = {
   error: <AlertCircle className="h-4 w-4 text-red-600" />,
@@ -33,6 +35,7 @@ export default function ReviewPage() {
   const setStatus = useStore((s) => s.setInspectionStatus);
   const logEvent = useStore((s) => s.logEvent);
   const [show, setShow] = useState<Severity | "all">("all");
+  const field = useFieldState(id);
 
   const rows = useMemo(() => (bundle ? buildGeneratorRows(bundle.dataset) : []), [bundle]);
   if (!bundle) return <EmptyState title="Inspection not found" action={<Link href="/inspections"><Button>Back</Button></Link>} />;
@@ -43,6 +46,7 @@ export default function ReviewPage() {
   const customer = customers.find((c) => c.id === inspection.customerId)?.name ?? "Customer";
   const facility = facilities.find((f) => f.id === inspection.facilityId)?.name ?? "Facility";
   const visible = issues.filter((i) => show === "all" || i.severity === show);
+  const photoBlocked = !!field && !field.exit.allowed && inspection.siteVisit.state !== "completed" && (inspection.status === "Draft" || inspection.status === "In Progress");
 
   const exportCsv = () => {
     const csv = toCsv(rows, { includeBom });
@@ -108,9 +112,15 @@ export default function ReviewPage() {
               ) : (
                 <div className="flex items-center gap-2 text-red-700"><AlertCircle className="h-4 w-4" />{counts.error} error{counts.error === 1 ? "" : "s"} must be fixed before approval.</div>
               )}
+              {photoBlocked && field ? (
+                <div className="space-y-3 rounded-lg border border-amber-300 bg-amber-50 p-3">
+                  <div className="flex items-start gap-2 text-amber-900"><AlertTriangle className="mt-0.5 h-4 w-4 shrink-0" /><span><strong>Building exterior photo required</strong> before this inspection can go to review: {field.exit.missing.map(buildingLabel).join(", ")}.</span></div>
+                  <ExteriorCapture field={field} takeLabel="Take Photo" />
+                </div>
+              ) : null}
               <div className="flex flex-wrap gap-2">
-                <Button onClick={() => { setStatus(inspection.id, "Needs Review"); toast("Sent for review"); }} disabled={inspection.status === "Needs Review"}>Submit for review</Button>
-                <Button variant="primary" disabled={counts.error > 0 || inspection.status === "Approved"} onClick={() => { setStatus(inspection.id, "Approved", `${counts.warning} warnings acknowledged`); toast("Inspection approved"); }}>
+                <Button disabled={inspection.status === "Needs Review" || photoBlocked} onClick={() => { if (setStatus(inspection.id, "Needs Review")) toast("Sent for review"); else toast("Building exterior photo required before review", "error"); }}>Submit for review</Button>
+                <Button variant="primary" disabled={counts.error > 0 || photoBlocked || inspection.status === "Approved"} onClick={() => { if (setStatus(inspection.id, "Approved", `${counts.warning} warnings acknowledged`)) toast("Inspection approved"); else toast("Building exterior photo required before approval", "error"); }}>
                   <CheckCircle2 className="h-4 w-4" />Approve
                 </Button>
               </div>

@@ -1,0 +1,8 @@
+﻿Image Date,Location,Humidity,Background Temp,Equipment,Component,Distance,Possible Cause,IR Image Number,Visual Image Number,Emissivity,Max Temp,Ambient Temp,Opened,Confidence,Review Notes
+03/10/2026,Building A - Electrical Room 1,45,73,Panel P1,Full Panel,4,NONE,1021,1022,0.95,86.2,74,"Yes, Completely",,
+03/10/2026,Building A - Electrical Room 1,45,73,Panel P2,Circuit 11,4,Loose Connection(s),1023,1024,0.95,131.7,74,"Yes, Completely",,
+03/10/2026,Building A - Electrical Room 1,45,73,Transformer T1,Full Transformer,6,NONE,1025,1025,0.95,104.5,74,"Yes, Completely",,
+03/10/2026,Building A - Electrical Room 1,45,73,Disconnect D1,Full Disconnect,4,NONE,,,0.95,,74,Item is Locked Out,,
+03/10/2026,Building A - Mezzanine MCC,48,79,MCC-1 Starter 3,Full Starter,3,NONE,1030,1031,0.95,97.3,81,"Yes, Completely",,
+03/10/2026,Building A - Mezzanine MCC,48,79,MCC-1 Starter 4,Full Starter,3,NONE,,,0.95,,81,Item Was Off at Time of Scan,,
+03/10/2026,Building A - Mezzanine MCC,48,79,Control Cabinet CC-2,Full Cabinet,3,NONE,1032,1033,0.95,,81,"Yes, with Dead-Front on",,

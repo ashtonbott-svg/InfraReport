@@ -37,13 +37,16 @@ import type {
   Location,
   Organization,
   OrganizationSettings,
+  Photo,
   ResultOverrides,
   ReviewEvent,
   User,
 } from "../domain/types";
 import { DEMO_ORG_ID, buildSeed } from "./seed";
+import { checkExit, newSiteVisit, requiredBuildings, type ExitCheck } from "../domain/site-visit";
+import { trackedLocalStorage } from "./save-status";
 
-export const SCHEMA_VERSION = 1;
+export const SCHEMA_VERSION = 2;
 
 export interface DataState {
   schemaVersion: number;
@@ -61,6 +64,10 @@ export interface DataState {
   images: ImageAsset[];
   documents: DocumentAsset[];
   reviewEvents: ReviewEvent[];
+  /** Photo metadata only. Binaries live in IndexedDB (see lib/photos/photo-db). */
+  photos: Photo[];
+  /** The inspection currently being worked on site, if any. */
+  activeInspectionId: ID | null;
 }
 
 export interface NewEquipmentRow {
@@ -92,7 +99,18 @@ export interface Actions {
     customerId: ID; facilityId: ID; date: string; inspectorId: ID; carryForward: boolean; notes?: string;
   }): ID;
   updateInspection(id: ID, patch: Partial<Inspection>): void;
-  setInspectionStatus(id: ID, status: InspectionStatus, detail?: string): void;
+  /** Returns false (and changes nothing) when the transition is blocked. */
+  setInspectionStatus(id: ID, status: InspectionStatus, detail?: string): boolean;
+  exitCheck(inspectionId: ID): ExitCheck;
+  startSiteVisit(inspectionId: ID): void;
+  pauseSiteVisit(inspectionId: ID): ExitCheck;
+  finishSiteVisit(inspectionId: ID): ExitCheck;
+  skipExteriorPrompt(inspectionId: ID): void;
+  setLastActiveRoom(inspectionId: ID, locationId: ID): void;
+  /** Call only after the binary has been verified in IndexedDB. */
+  addPhotoRecord(photo: Omit<Photo, "organizationId" | "savedAt">): void;
+  removePhotoRecord(id: ID): void;
+  setPhotoBuilding(id: ID, building: string): void;
   logEvent(inspectionId: ID, action: string, detail: string): void;
   addRoomToInspection(inspectionId: ID, locationId: ID): ID;
   createRoomForInspection(inspectionId: ID, room: { building: string; name: string; area: string }, conditions?: Partial<InspectionRoomConditions>): ID;
@@ -128,6 +146,8 @@ function initialState(): DataState {
     ...seed,
     images: [],
     documents: [],
+    photos: [],
+    activeInspectionId: null,
   };
 }
 
@@ -209,7 +229,7 @@ export const useStore = create<Store>()(
           const inspection: Inspection = {
             id, organizationId: org(), customerId, facilityId, date, inspectorId, status: "Draft",
             defaultEmissivity: orgSettings?.defaultEmissivity || DEFAULT_EMISSIVITY,
-            notes: notes ?? "", createdAt: now(), updatedAt: now(),
+            notes: notes ?? "", createdAt: now(), updatedAt: now(), siteVisit: newSiteVisit(),
           };
           const rooms: InspectionRoomConditions[] = [];
           const results: InspectionResult[] = [];
@@ -241,10 +261,91 @@ export const useStore = create<Store>()(
           set((s) => ({ inspections: s.inspections.map((i) => (i.id === id ? { ...i, ...normalizePatch(patch), id, updatedAt: now() } : i)) }));
         },
         setInspectionStatus(id, status, detail) {
-          const prev = get().inspections.find((i) => i.id === id)?.status;
-          if (!prev || prev === status) return;
+          const insp = get().inspections.find((i) => i.id === id);
+          const prev = insp?.status;
+          if (!insp || !prev || prev === status) return false;
+          // Leaving the field stage (review or later) requires the exterior photos.
+          const fieldStage: InspectionStatus[] = ["Draft", "In Progress"];
+          if (fieldStage.includes(prev) && !fieldStage.includes(status) && insp.siteVisit.state !== "completed" && !get().exitCheck(id).allowed) {
+            return false;
+          }
           set((s) => ({ inspections: s.inspections.map((i) => (i.id === id ? { ...i, status, updatedAt: now() } : i)) }));
           get().logEvent(id, "Status changed", `${prev} → ${status}${detail ? ` (${detail})` : ""}`);
+          return true;
+        },
+
+        exitCheck(inspectionId) {
+          const s = get();
+          const rooms = s.rooms.filter((r) => r.inspectionId === inspectionId);
+          const locs = new Map(s.locations.map((l) => [l.id, l]));
+          return checkExit(requiredBuildings(rooms, locs), s.photos, inspectionId);
+        },
+        startSiteVisit(inspectionId) {
+          const insp = get().inspections.find((i) => i.id === inspectionId);
+          if (!insp) return;
+          const sessions = insp.siteVisit.sessions;
+          const open = sessions.length > 0 && sessions[sessions.length - 1].endedAt === null;
+          const resumed = insp.siteVisit.state === "paused";
+          set((s) => ({
+            activeInspectionId: inspectionId,
+            inspections: s.inspections.map((i) => i.id === inspectionId ? {
+              ...i,
+              updatedAt: now(),
+              siteVisit: { ...i.siteVisit, state: "active", completedAt: null, sessions: open ? sessions : [...sessions, { startedAt: now(), endedAt: null }] },
+            } : i),
+          }));
+          if (!open) get().logEvent(inspectionId, resumed ? "Site visit resumed" : "Site visit started", `Visit day ${new Set([...sessions.map((x) => new Date(x.startedAt).toDateString()), new Date().toDateString()]).size}`);
+          if (insp.status === "Draft") get().setInspectionStatus(inspectionId, "In Progress", "site visit started");
+        },
+        pauseSiteVisit(inspectionId) {
+          const check = get().exitCheck(inspectionId);
+          if (!check.allowed) return check;
+          set((s) => ({
+            activeInspectionId: s.activeInspectionId === inspectionId ? null : s.activeInspectionId,
+            inspections: s.inspections.map((i) => i.id === inspectionId ? {
+              ...i, updatedAt: now(),
+              siteVisit: { ...i.siteVisit, state: "paused", sessions: i.siteVisit.sessions.map((x) => (x.endedAt === null ? { ...x, endedAt: now() } : x)) },
+            } : i),
+          }));
+          get().logEvent(inspectionId, "Site visit paused", "Saved to return later");
+          return check;
+        },
+        finishSiteVisit(inspectionId) {
+          const check = get().exitCheck(inspectionId);
+          if (!check.allowed) return check;
+          set((s) => ({
+            activeInspectionId: s.activeInspectionId === inspectionId ? null : s.activeInspectionId,
+            inspections: s.inspections.map((i) => i.id === inspectionId ? {
+              ...i, updatedAt: now(),
+              siteVisit: { ...i.siteVisit, state: "completed", completedAt: now(), sessions: i.siteVisit.sessions.map((x) => (x.endedAt === null ? { ...x, endedAt: now() } : x)) },
+            } : i),
+          }));
+          get().logEvent(inspectionId, "Site visit completed", "Exterior photos verified");
+          const st = get().inspections.find((i) => i.id === inspectionId)?.status;
+          if (st === "Draft" || st === "In Progress") get().setInspectionStatus(inspectionId, "Needs Review", "site visit completed");
+          return check;
+        },
+        skipExteriorPrompt(inspectionId) {
+          set((s) => ({ inspections: s.inspections.map((i) => (i.id === inspectionId ? { ...i, siteVisit: { ...i.siteVisit, skippedExteriorPrompt: true } } : i)) }));
+          get().logEvent(inspectionId, "Exterior photo skipped", "Reminder will show until a photo is saved");
+        },
+        setLastActiveRoom(inspectionId, locationId) {
+          const insp = get().inspections.find((i) => i.id === inspectionId);
+          if (!insp || insp.siteVisit.lastActiveLocationId === locationId) return;
+          set((s) => ({ inspections: s.inspections.map((i) => (i.id === inspectionId ? { ...i, siteVisit: { ...i.siteVisit, lastActiveLocationId: locationId } } : i)) }));
+        },
+        addPhotoRecord(photo) {
+          set((s) => ({ photos: [...s.photos.filter((p) => p.id !== photo.id), { ...photo, organizationId: org(), savedAt: now() }] }));
+          touch(photo.inspectionId);
+          if (photo.kind === "exterior") get().logEvent(photo.inspectionId, "Exterior photo saved", photo.building ? `Building: ${photo.building}` : "Main building");
+        },
+        removePhotoRecord(id) {
+          const p = get().photos.find((x) => x.id === id);
+          set((s) => ({ photos: s.photos.filter((x) => x.id !== id) }));
+          if (p) touch(p.inspectionId);
+        },
+        setPhotoBuilding(id, building) {
+          set((s) => ({ photos: s.photos.map((p) => (p.id === id ? { ...p, building: building.trim() } : p)) }));
         },
         logEvent(inspectionId, action, detail) {
           set((s) => ({
@@ -406,7 +507,8 @@ export const useStore = create<Store>()(
     {
       name: STORAGE_KEY,
       version: SCHEMA_VERSION,
-      storage: createJSONStorage(() => localStorage),
+      storage: createJSONStorage(() => trackedLocalStorage),
+      migrate: (persisted, version) => migrateState(persisted as Partial<DataState>, version) as unknown as Store,
       skipHydration: true,
       partialize: (s) => {
         const out: Partial<DataState> = {};
@@ -421,4 +523,22 @@ export const useStore = create<Store>()(
 
 export function allowedCauses(settings: OrganizationSettings | undefined): string[] {
   return [...BUILT_IN_POSSIBLE_CAUSES, ...(settings?.customPossibleCauses ?? [])];
+}
+
+/**
+ * Upgrade older saved data in place. Never discards inspection records.
+ * v1 -> v2: adds site visit state, photo list and the active inspection.
+ */
+export function migrateState(state: Partial<DataState>, version: number): Partial<DataState> {
+  const out: Partial<DataState> = { ...state };
+  if (version < 2) {
+    out.inspections = (state.inspections ?? []).map((i) => ({
+      ...i,
+      siteVisit: i.siteVisit ?? (["Draft", "In Progress"].includes(i.status) ? newSiteVisit() : { ...newSiteVisit(), state: "completed" as const }),
+    }));
+    out.photos = state.photos ?? [];
+    out.activeInspectionId = state.activeInspectionId ?? null;
+  }
+  out.schemaVersion = SCHEMA_VERSION;
+  return out;
 }

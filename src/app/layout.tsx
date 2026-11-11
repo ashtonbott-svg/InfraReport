@@ -10,9 +10,12 @@ export const metadata: Metadata = {
   title: { default: "InfraReport", template: "%s · InfraReport" },
   description: "Electrical infrared inspection management and reporting. Prototype build with fictional demonstration data.",
   robots: { index: false, follow: false },
+  applicationName: "InfraReport",
+  appleWebApp: { capable: true, title: "InfraReport", statusBarStyle: "black" },
+  formatDetection: { telephone: false },
 };
 
-export const viewport: Viewport = { themeColor: "#0f172a", width: "device-width", initialScale: 1 };
+export const viewport: Viewport = { themeColor: "#0f172a", width: "device-width", initialScale: 1, viewportFit: "cover", interactiveWidget: "resizes-content" };
 
 export default function RootLayout({ children }: LayoutProps<"/">) {
   return (

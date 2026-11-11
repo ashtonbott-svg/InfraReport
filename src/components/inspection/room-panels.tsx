@@ -1,13 +1,10 @@
 "use client";
 
-import { useRef, useState } from "react";
-import { useDraft, useOnOpen } from "@/lib/use-draft";
+import { useDraft } from "@/lib/use-draft";
 import { Plus, Thermometer, Droplets, Ruler, CalendarDays, Wind } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
-import { Field, Input, Select } from "@/components/ui/field";
-import { Modal } from "@/components/ui/modal";
-import { toast } from "@/components/ui/toast";
+import { Input, Select } from "@/components/ui/field";
 import { cn } from "@/lib/cn";
 import { locationLabel } from "@/lib/domain/csv";
 import { isNumericText } from "@/lib/domain/rules";
@@ -110,77 +107,5 @@ export function RoomConditionsCard({ entry, results, inspectionDate }: { entry: 
         <CondInput id={`i-${room.id}`} label={`Image Date${room.imageDate ? "" : " (insp. date)"}`} icon={<CalendarDays className="h-3.5 w-3.5" />} type="date" value={room.imageDate || inspectionDate} onCommit={(v) => update(room.id, { imageDate: v === inspectionDate ? "" : v })} />
       </div>
     </Card>
-  );
-}
-
-export function AddRoomModal({ open, onClose, inspectionId, facilityId, usedLocationIds, onAdded }: {
-  open: boolean; onClose: () => void; inspectionId: string; facilityId: string; usedLocationIds: Set<string>; onAdded: (locationId: string) => void;
-}) {
-  const locations = useStore((s) => s.locations);
-  const addRoomToInspection = useStore((s) => s.addRoomToInspection);
-  const createRoom = useStore((s) => s.createRoomForInspection);
-  const available = locations.filter((l) => l.facilityId === facilityId && !usedLocationIds.has(l.id));
-  const [mode, setMode] = useState<"new" | "existing">("new");
-  const [existing, setExisting] = useState("");
-  const [v, setV] = useState({ name: "", building: "", area: "", humidity: "", ambientTemp: "", backgroundTemp: "", distance: "" });
-  const nameRef = useRef<HTMLInputElement>(null);
-  useOnOpen(open, () => {
-    setMode("new");
-    setExisting("");
-    setV((p) => ({ name: "", building: p.building, area: "", humidity: "", ambientTemp: "", backgroundTemp: "", distance: "" }));
-  });
-
-  const valid = mode === "new" ? v.name.trim() !== "" : existing !== "";
-  const submit = () => {
-    if (!valid) return;
-    let locationId = existing;
-    const cond = { humidity: v.humidity, ambientTemp: v.ambientTemp, backgroundTemp: v.backgroundTemp, distance: v.distance };
-    if (mode === "new") {
-      locationId = createRoom(inspectionId, { name: v.name.trim(), building: v.building.trim(), area: v.area.trim() }, cond);
-    } else {
-      const rcId = addRoomToInspection(inspectionId, existing);
-      useStore.getState().updateRoomConditions(rcId, cond);
-    }
-    toast("Room added");
-    onAdded(locationId);
-    onClose();
-  };
-
-  return (
-    <Modal open={open} onClose={onClose} title="Add room to inspection" description="Enter the environmental conditions once. Every item in the room inherits them."
-      footer={<><Button onClick={onClose}>Cancel</Button><Button variant="primary" onClick={submit} disabled={!valid}>Add room</Button></>}>
-      <form onSubmit={(e) => { e.preventDefault(); submit(); }} className="space-y-4">
-        {available.length > 0 ? (
-          <div className="flex gap-1 rounded-md bg-slate-100 p-1 text-sm">
-            {(["new", "existing"] as const).map((m) => (
-              <button type="button" key={m} onClick={() => setMode(m)} className={cn("flex-1 rounded px-3 py-1.5 font-medium", mode === m ? "bg-white shadow-sm" : "text-slate-500")}>
-                {m === "new" ? "New room" : `Existing room (${available.length})`}
-              </button>
-            ))}
-          </div>
-        ) : null}
-        {mode === "new" ? (
-          <div className="grid gap-3 sm:grid-cols-2">
-            <Field label="Room name *" className="sm:col-span-2" htmlFor="ar-name"><Input ref={nameRef} id="ar-name" autoFocus value={v.name} onChange={(e) => setV({ ...v, name: e.target.value })} placeholder="Electrical Room 1" /></Field>
-            <Field label="Building" htmlFor="ar-b"><Input id="ar-b" value={v.building} onChange={(e) => setV({ ...v, building: e.target.value })} placeholder="Optional" /></Field>
-            <Field label="Area / floor" htmlFor="ar-a"><Input id="ar-a" value={v.area} onChange={(e) => setV({ ...v, area: e.target.value })} placeholder="Optional" /></Field>
-          </div>
-        ) : (
-          <Field label="Facility room" htmlFor="ar-ex">
-            <Select id="ar-ex" value={existing} onChange={(e) => setExisting(e.target.value)}>
-              <option value="">Select…</option>
-              {available.map((l) => <option key={l.id} value={l.id}>{locationLabel(l)}</option>)}
-            </Select>
-          </Field>
-        )}
-        <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
-          <Field label="Humidity" htmlFor="ar-h"><Input id="ar-h" inputMode="decimal" value={v.humidity} onChange={(e) => setV({ ...v, humidity: e.target.value })} placeholder="%" /></Field>
-          <Field label="Ambient" htmlFor="ar-am"><Input id="ar-am" inputMode="decimal" value={v.ambientTemp} onChange={(e) => setV({ ...v, ambientTemp: e.target.value })} placeholder="°F" /></Field>
-          <Field label="Background" htmlFor="ar-bg"><Input id="ar-bg" inputMode="decimal" value={v.backgroundTemp} onChange={(e) => setV({ ...v, backgroundTemp: e.target.value })} placeholder="°F" /></Field>
-          <Field label="Distance" htmlFor="ar-d"><Input id="ar-d" inputMode="decimal" value={v.distance} onChange={(e) => setV({ ...v, distance: e.target.value })} placeholder="ft" /></Field>
-        </div>
-        <button type="submit" className="hidden" />
-      </form>
-    </Modal>
   );
 }

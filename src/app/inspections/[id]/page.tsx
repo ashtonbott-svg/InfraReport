@@ -14,6 +14,10 @@ import { countBySeverity } from "@/lib/domain/validation";
 import { locationLabel } from "@/lib/domain/csv";
 import { formatDateTime } from "@/lib/format";
 import { POSSIBLE_CAUSE_NONE } from "@/lib/domain/constants";
+import { ExteriorCapture, ExteriorChecklist, useFieldState } from "@/components/field/exterior-photos";
+import { useBeginFieldWork } from "@/lib/store/field-actions";
+import { visitDayCount } from "@/lib/domain/site-visit";
+import { Play } from "lucide-react";
 
 export default function InspectionOverviewPage() {
   const { id } = useParams<{ id: string }>();
@@ -21,6 +25,9 @@ export default function InspectionOverviewPage() {
   const events = useReviewEvents().filter((e) => e.inspectionId === id).sort((a, b) => b.at.localeCompare(a.at));
   const users = useUsers();
   const updateInspection = useStore((s) => s.updateInspection);
+  const field = useFieldState(id);
+  const activeId = useStore((s) => s.activeInspectionId);
+  const begin = useBeginFieldWork();
 
   if (!bundle) return <EmptyState title="Inspection not found" action={<Link href="/inspections"><Button>Back</Button></Link>} />;
   const { dataset, issues } = bundle;
@@ -41,6 +48,29 @@ export default function InspectionOverviewPage() {
 
       <div className="mt-6 grid gap-6 xl:grid-cols-[1fr_380px]">
         <div className="space-y-6">
+          {field ? (
+            <Card>
+              <CardHeader title="Site visit" description={`State: ${inspection.siteVisit.state.replace("-", " ")} · ${visitDayCount(inspection)} visit day(s)`}
+                actions={activeId !== id && inspection.siteVisit.state !== "completed" && !activeId ? (
+                  <Button variant="primary" onClick={() => begin(id)}><Play className="h-4 w-4" />{inspection.siteVisit.state === "paused" ? "Resume Inspection" : "Start Site Visit"}</Button>
+                ) : null} />
+              <CardBody className="grid gap-6 md:grid-cols-2">
+                <div>
+                  <h3 className="mb-2 text-xs font-semibold uppercase tracking-wide text-slate-500">Building exterior photos</h3>
+                  <ExteriorChecklist field={field} />
+                </div>
+                <div>
+                  <h3 className="mb-2 text-xs font-semibold uppercase tracking-wide text-slate-500">Add exterior photo</h3>
+                  <ExteriorCapture field={field} takeLabel={field.exit.allowed ? "Add Another Photo" : "Take Photo"} />
+                  {inspection.siteVisit.sessions.length ? (
+                    <ul className="mt-4 space-y-1 text-xs text-slate-500">
+                      {inspection.siteVisit.sessions.map((s, i) => <li key={i}>Visit {i + 1}: {formatDateTime(s.startedAt)} to {s.endedAt ? formatDateTime(s.endedAt) : "now"}</li>)}
+                    </ul>
+                  ) : null}
+                </div>
+              </CardBody>
+            </Card>
+          ) : null}
           <Card>
             <CardHeader title="Next step" />
             <CardBody className="flex flex-wrap gap-3">
