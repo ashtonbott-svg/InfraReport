@@ -3,7 +3,7 @@
 import Link from "next/link";
 import { useParams } from "next/navigation";
 import { useMemo, useState } from "react";
-import { MapPin, Pencil, Plus, Trash2 } from "lucide-react";
+import { FileUp, MapPin, Pencil, Plus, Trash2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Card, CardBody, CardHeader } from "@/components/ui/card";
 import { Badge, StatusBadge } from "@/components/ui/badge";
@@ -57,6 +57,7 @@ export default function FacilityDetailPage() {
         description={<span className="inline-flex items-center gap-1"><MapPin className="h-3.5 w-3.5" />{[facility.address, facility.city, facility.state, facility.postalCode].filter(Boolean).join(", ") || "No address"}</span>}
         actions={<>
           <Button onClick={() => setEditFac(true)}><Pencil className="h-4 w-4" />Edit</Button>
+          <Link href={`/facilities/${facility.id}/import`}><Button><FileUp className="h-4 w-4" />Import Equipment List</Button></Link>
           <Link href={`/inspections/new?customer=${facility.customerId}&facility=${facility.id}`}><Button variant="primary"><Plus className="h-4 w-4" />New Inspection</Button></Link>
         </>} />
 

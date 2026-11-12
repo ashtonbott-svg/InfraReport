@@ -26,11 +26,13 @@ export function PhotoCapture({ onSave, takeLabel = "Take Photo", compact, autoOp
   const pick = (f: File | undefined | null) => { if (f) { setError(null); setFile(f); } };
   const save = async () => {
     if (!file) return;
+    const saved = file;
     setSaving(true);
     setError(null);
     try {
-      await onSave(file);
-      setFile(null);
+      await onSave(saved);
+      // Only clear if no new photo was picked while this one was saving.
+      setFile((cur) => (cur === saved ? null : cur));
     } catch (e) {
       setError(e instanceof Error ? e.message : "Photo could not be saved");
     } finally {

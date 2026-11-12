@@ -14,6 +14,8 @@ import { BUILT_IN_POSSIBLE_CAUSES, OPENED_VALUES, STORAGE_KEY } from "@/lib/doma
 import { GENERATOR_COLUMNS } from "@/lib/domain/csv";
 import { downloadText } from "@/lib/download";
 import { todayISO } from "@/lib/format";
+import { DemoDataNotice } from "@/components/field/demo-data-notice";
+import { deletePhotoBlob } from "@/lib/photos/photo-db";
 
 export default function SettingsPage() {
   const org = useOrganization();
@@ -106,7 +108,18 @@ export default function SettingsPage() {
               <Button onClick={backup}><Download className="h-4 w-4" />Download JSON backup</Button>
               <Button onClick={() => fileRef.current?.click()}><Upload className="h-4 w-4" />Restore backup</Button>
               <input ref={fileRef} type="file" accept="application/json" className="hidden" onChange={(e) => { restore(e.target.files?.[0]); e.target.value = ""; }} />
-              <Button variant="danger" onClick={() => { if (confirm("Replace all data in this browser with the original demo data?")) { resetDemoData(); toast("Demo data restored"); } }}><RotateCcw className="h-4 w-4" />Reset demo data</Button>
+              <Button variant="danger" onClick={async () => {
+                const typed = prompt("This permanently erases ALL customers, facilities, equipment, inspections and photos on this device. Download a backup first.\n\nType ERASE to confirm.");
+                if (typed?.trim().toUpperCase() !== "ERASE") { if (typed !== null) toast("Nothing was erased", "error"); return; }
+                const ids = useStore.getState().photos.map((p) => p.id);
+                resetDemoData();
+                await Promise.all(ids.map((pid) => deletePhotoBlob(pid).catch(() => undefined)));
+                toast("All data erased from this device");
+              }}><RotateCcw className="h-4 w-4" />Erase all data on this device</Button>
+            </div>
+            <div className="border-t border-slate-100 pt-4">
+              <div className="mb-2 text-sm font-medium text-slate-800">Sample data from earlier prototype versions</div>
+              <DemoDataNotice compact />
             </div>
           </CardBody>
         </Card>

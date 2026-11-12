@@ -18,16 +18,23 @@ describe("IndexedDB photo storage", () => {
 });
 
 describe("persistPhoto", () => {
-  beforeEach(() => { S().resetDemoData(); vi.restoreAllMocks(); });
+  let inspId = "";
+  beforeEach(() => {
+    S().resetDemoData(); vi.restoreAllMocks();
+    const c = S().createCustomer({ name: "C", contactName: "", contactEmail: "", contactPhone: "", notes: "" });
+    const f = S().createFacility({ customerId: c, name: "F", address: "", city: "", state: "", postalCode: "", notes: "" });
+    inspId = S().createInspection({ customerId: c, facilityId: f, date: "2026-11-12", inspectorIds: ["user-ashton"], carryForward: false });
+    S().createRoomForInspection(inspId, { building: "Building A", name: "Room", area: "" });
+  });
 
   it("creates the photo record only after the binary is stored", async () => {
     const { persistPhoto } = await import("@/lib/photos/capture");
     const file = new File([new Uint8Array(1234)], "front.jpg", { type: "image/jpeg" });
-    const id = await persistPhoto(file, { inspectionId: "insp-2", facilityId: "fac-1", kind: "exterior", building: "Building A", resultId: null });
+    const id = await persistPhoto(file, { inspectionId: inspId, facilityId: "f", kind: "exterior", building: "Building A", resultId: null });
     const rec = S().photos.find((p) => p.id === id)!;
     expect(rec.sizeBytes).toBe(1234);
     expect((await getPhotoBlob(id))?.blob.size).toBe(1234);
-    expect(S().exitCheck("insp-2").missing).not.toContain("Building A");
+    expect(S().exitCheck(inspId).missing).not.toContain("Building A");
   });
 
   it("creates no record when the binary cannot be saved", async () => {
@@ -36,7 +43,7 @@ describe("persistPhoto", () => {
     const { persistPhoto } = await import("@/lib/photos/capture");
     const before = S().photos.length;
     const file = new File([new Uint8Array(10)], "front.jpg", { type: "image/jpeg" });
-    await expect(persistPhoto(file, { inspectionId: "insp-2", facilityId: "fac-1", kind: "exterior", building: "", resultId: null })).rejects.toThrow("Storage full");
+    await expect(persistPhoto(file, { inspectionId: inspId, facilityId: "f", kind: "exterior", building: "", resultId: null })).rejects.toThrow("Storage full");
     expect(S().photos.length).toBe(before);
     expect(useSaveStatus.getState().photoError).toBe("Storage full");
   });
@@ -44,7 +51,7 @@ describe("persistPhoto", () => {
   it("rejects non-image files", async () => {
     const { persistPhoto } = await import("@/lib/photos/capture");
     const file = new File(["hello"], "notes.txt", { type: "text/plain" });
-    await expect(persistPhoto(file, { inspectionId: "insp-2", facilityId: "fac-1", kind: "exterior", building: "", resultId: null })).rejects.toThrow();
+    await expect(persistPhoto(file, { inspectionId: inspId, facilityId: "f", kind: "exterior", building: "", resultId: null })).rejects.toThrow();
   });
 });
 

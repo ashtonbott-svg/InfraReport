@@ -10,6 +10,7 @@
 import { create } from "zustand";
 import { createJSONStorage, persist } from "zustand/middleware";
 import {
+  OTHER_EQUIPMENT_TYPE,
   BUILT_IN_POSSIBLE_CAUSES,
   DEFAULT_EMISSIVITY,
   DEFAULT_OPENED,
@@ -42,11 +43,11 @@ import type {
   ReviewEvent,
   User,
 } from "../domain/types";
-import { DEMO_ORG_ID, buildSeed } from "./seed";
+import { DEFAULT_ORG_ID as DEMO_ORG_ID, ASHTON_ID, LEGACY_DEMO_IDS, THERMOGRAPHERS, buildSeed } from "./seed";
 import { checkExit, newSiteVisit, requiredBuildings, type ExitCheck } from "../domain/site-visit";
 import { trackedLocalStorage } from "./save-status";
 
-export const SCHEMA_VERSION = 2;
+export const SCHEMA_VERSION = 3;
 
 export interface DataState {
   schemaVersion: number;
@@ -96,7 +97,7 @@ export interface Actions {
   createEquipment(input: Omit<Equipment, "id" | "organizationId" | "createdAt" | "sortOrder" | "active">): ID;
   updateEquipment(id: ID, patch: Partial<Equipment>): void;
   createInspection(input: {
-    customerId: ID; facilityId: ID; date: string; inspectorId: ID; carryForward: boolean; notes?: string;
+    customerId: ID; facilityId: ID; date: string; inspectorIds: ID[]; carryForward: boolean; notes?: string;
   }): ID;
   updateInspection(id: ID, patch: Partial<Inspection>): void;
   /** Returns false (and changes nothing) when the transition is blocked. */
@@ -128,7 +129,12 @@ export interface Actions {
   updateImage(id: ID, patch: Partial<ImageAsset>): void;
   clearImages(inspectionId: ID): void;
   updateOrgSettings(patch: Partial<OrganizationSettings>): void;
+  /** Restore the initial empty workspace (all records removed). */
   resetDemoData(): void;
+  /** Remove only the fictional records from earlier releases (and anything attached to them). */
+  clearDemoData(): DemoCounts;
+  /** Save a reviewed equipment list to a facility's permanent inventory, in order. */
+  importInventory(facilityId: ID, rows: InventoryImportRow[], sourceName: string): { rooms: number; equipment: number; newRooms: number };
 }
 
 export type Store = DataState & Actions;
@@ -142,7 +148,7 @@ function initialState(): DataState {
   return {
     schemaVersion: SCHEMA_VERSION,
     currentOrgId: DEMO_ORG_ID,
-    currentUserId: "user-1",
+    currentUserId: ASHTON_ID,
     ...seed,
     images: [],
     documents: [],
@@ -222,12 +228,12 @@ export const useStore = create<Store>()(
           set((s) => ({ equipment: s.equipment.map((e) => (e.id === id ? { ...e, ...patch, id } : e)) }));
         },
 
-        createInspection({ customerId, facilityId, date, inspectorId, carryForward, notes }) {
+        createInspection({ customerId, facilityId, date, inspectorIds, carryForward, notes }) {
           const id = uid("insp");
           const s = get();
           const orgSettings = s.organizations.find((o) => o.id === org())?.settings;
           const inspection: Inspection = {
-            id, organizationId: org(), customerId, facilityId, date, inspectorId, status: "Draft",
+            id, organizationId: org(), customerId, facilityId, date, inspectorIds: [...new Set(inspectorIds)], status: "Draft",
             defaultEmissivity: orgSettings?.defaultEmissivity || DEFAULT_EMISSIVITY,
             notes: notes ?? "", createdAt: now(), updatedAt: now(), siteVisit: newSiteVisit(),
           };
@@ -242,7 +248,7 @@ export const useStore = create<Store>()(
             eqs.forEach((e, i) => {
               results.push({
                 id: uid("res"), organizationId: org(), inspectionId: id, equipmentId: e.id, locationId: e.locationId,
-                component: e.defaultComponent, irImageNumber: "", visualImageNumber: "", visualFromSinglePhoto: false,
+                component: e.defaultComponent, distance: "", irImageNumber: "", visualImageNumber: "", visualFromSinglePhoto: false,
                 maxTemp: "", opened: DEFAULT_OPENED, possibleCause: POSSIBLE_CAUSE_NONE, problemNotes: "",
                 confidence: "", reviewNotes: "", overrides: { ...EMPTY_OVERRIDES }, source: "carried-forward",
                 sortOrder: i + 1, createdAt: now(), updatedAt: now(),
@@ -389,12 +395,13 @@ export const useStore = create<Store>()(
           const id = uid("res");
           const result: InspectionResult = {
             id, organizationId: org(), inspectionId, equipmentId, locationId, component,
+            distance: normalizeNumericInput(row.distance ?? ""),
             irImageNumber: (row.irImageNumber ?? "").trim(), visualImageNumber: (row.visualImageNumber ?? "").trim(),
             visualFromSinglePhoto: !!row.visualFromSinglePhoto,
             maxTemp: normalizeNumericInput(row.maxTemp ?? ""), opened: row.opened || DEFAULT_OPENED,
             possibleCause: row.possibleCause || POSSIBLE_CAUSE_NONE, problemNotes: row.problemNotes ?? "",
             confidence: "", reviewNotes: "",
-            overrides: { ...EMPTY_OVERRIDES, distance: row.distance != null && row.distance !== "" ? normalizeNumericInput(row.distance) : null },
+            overrides: { ...EMPTY_OVERRIDES },
             source: "manual", sortOrder: nextResultOrder(inspectionId), createdAt: now(), updatedAt: now(),
           };
           set((s) => ({ results: [...s.results, result] }));
@@ -409,7 +416,7 @@ export const useStore = create<Store>()(
           const id = uid("res");
           set((s) => ({
             results: [...s.results, {
-              id, organizationId: org(), inspectionId, equipmentId, locationId: e.locationId, component: e.defaultComponent,
+              id, organizationId: org(), inspectionId, equipmentId, locationId: e.locationId, component: e.defaultComponent, distance: "",
               irImageNumber: "", visualImageNumber: "", visualFromSinglePhoto: false, maxTemp: "", opened: DEFAULT_OPENED,
               possibleCause: POSSIBLE_CAUSE_NONE, problemNotes: "", confidence: "", reviewNotes: "",
               overrides: { ...EMPTY_OVERRIDES }, source: "carried-forward", sortOrder: nextResultOrder(inspectionId),
@@ -500,7 +507,47 @@ export const useStore = create<Store>()(
           }));
         },
         resetDemoData() {
-          set(initialState());
+          set({ ...initialState(), photos: [] });
+        },
+        clearDemoData() {
+          const s = get();
+          const plan = planDemoRemoval(s);
+          set({
+            customers: s.customers.filter((x) => !plan.customers.has(x.id)),
+            facilities: s.facilities.filter((x) => !plan.facilities.has(x.id)),
+            locations: s.locations.filter((x) => !plan.facilities.has(x.facilityId)),
+            equipment: s.equipment.filter((x) => !plan.facilities.has(x.facilityId)),
+            inspections: s.inspections.filter((x) => !plan.inspections.has(x.id)),
+            rooms: s.rooms.filter((x) => !plan.inspections.has(x.inspectionId)),
+            results: s.results.filter((x) => !plan.inspections.has(x.inspectionId)),
+            images: s.images.filter((x) => !plan.inspections.has(x.inspectionId)),
+            documents: s.documents.filter((x) => !x.inspectionId || !plan.inspections.has(x.inspectionId)),
+            photos: s.photos.filter((x) => !plan.inspections.has(x.inspectionId)),
+            reviewEvents: s.reviewEvents.filter((x) => !plan.inspections.has(x.inspectionId)),
+            activeInspectionId: s.activeInspectionId && plan.inspections.has(s.activeInspectionId) ? null : s.activeInspectionId,
+          });
+          return demoCounts(plan);
+        },
+        importInventory(facilityId, rows, sourceName) {
+          const s = get();
+          const key = (b: string, r: string) => `${b.trim().toLowerCase()}\u0000${r.trim().toLowerCase()}`;
+          const existing = new Map(s.locations.filter((l) => l.facilityId === facilityId).map((l) => [key(l.building, l.name), l.id]));
+          const used = new Set<string>();
+          let newRooms = 0;
+          for (const row of rows) {
+            const k = key(row.building, row.room || "Unassigned");
+            if (!existing.has(k)) {
+              existing.set(k, get().createLocation({ facilityId, building: row.building.trim(), name: (row.room || "Unassigned").trim(), area: "" }));
+              newRooms++;
+            }
+            const locationId = existing.get(k)!;
+            used.add(locationId);
+            const id = get().createEquipment({
+              facilityId, locationId, name: row.name.trim(), equipmentType: row.type || OTHER_EQUIPMENT_TYPE, defaultComponent: row.component.trim(),
+            });
+            get().updateEquipment(id, { identifiers: row.identifiers?.trim() || undefined, importedFrom: sourceName });
+          }
+          return { rooms: used.size, equipment: rows.length, newRooms };
         },
       };
     },
@@ -539,6 +586,55 @@ export function migrateState(state: Partial<DataState>, version: number): Partia
     out.photos = state.photos ?? [];
     out.activeInspectionId = state.activeInspectionId ?? null;
   }
+  if (version < 3) {
+    // Thermographers: only Ashton Bott and Justice Thompson are selectable.
+    out.users = THERMOGRAPHERS.map((u) => ({ ...u, organizationId: out.currentOrgId ?? u.organizationId }));
+    out.currentUserId = ASHTON_ID;
+    const valid = new Set(out.users.map((u) => u.id));
+    out.inspections = (out.inspections ?? []).map((i) => {
+      const legacy = (i as unknown as { inspectorId?: string }).inspectorId;
+      const ids = i.inspectorIds ?? (legacy ? [legacy] : []);
+      const { inspectorId: _drop, ...rest } = i as unknown as Inspection & { inspectorId?: string };
+      void _drop;
+      return { ...rest, inspectorIds: ids.filter((x) => valid.has(x)) };
+    });
+    // Distance moves from the room to each equipment record. The value that
+    // used to export (row override, else room default) is kept exactly.
+    const rooms = out.rooms ?? [];
+    out.results = (out.results ?? []).map((r) => {
+      const room = rooms.find((x) => x.inspectionId === r.inspectionId && x.locationId === r.locationId);
+      const distance = r.distance ?? r.overrides?.distance ?? room?.distance ?? "";
+      return { ...r, distance, overrides: { ...EMPTY_OVERRIDES, ...r.overrides, distance: null } };
+    });
+    out.rooms = rooms.map((x) => ({ ...x, distance: "" }));
+    out.organizations = (out.organizations ?? []).map((o) =>
+      o.isDemo && o.name === "Demo Thermography Co. (Fictional)" ? { ...o, name: "Infinite Infrared LLC", isDemo: false } : o);
+  }
   out.schemaVersion = SCHEMA_VERSION;
   return out;
+}
+
+export interface InventoryImportRow {
+  building: string;
+  room: string;
+  name: string;
+  type: string;
+  component: string;
+  identifiers?: string;
+}
+
+export interface DemoCounts { customers: number; facilities: number; inspections: number; equipment: number }
+
+interface DemoPlan { customers: Set<string>; facilities: Set<string>; inspections: Set<string>; equipment: number }
+
+/** Fictional records from earlier releases, plus anything created underneath them. */
+export function planDemoRemoval(s: Pick<DataState, "customers" | "facilities" | "inspections" | "equipment">): DemoPlan {
+  const customers = new Set(s.customers.filter((c) => LEGACY_DEMO_IDS.customers.includes(c.id)).map((c) => c.id));
+  const facilities = new Set(s.facilities.filter((f) => LEGACY_DEMO_IDS.facilities.includes(f.id) || customers.has(f.customerId)).map((f) => f.id));
+  const inspections = new Set(s.inspections.filter((i) => LEGACY_DEMO_IDS.inspections.includes(i.id) || facilities.has(i.facilityId) || customers.has(i.customerId)).map((i) => i.id));
+  return { customers, facilities, inspections, equipment: s.equipment.filter((e) => facilities.has(e.facilityId)).length };
+}
+
+export function demoCounts(p: DemoPlan): DemoCounts {
+  return { customers: p.customers.size, facilities: p.facilities.size, inspections: p.inspections.size, equipment: p.equipment };
 }

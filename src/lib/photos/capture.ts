@@ -1,6 +1,6 @@
 "use client";
 
-import { makeThumbnail, savePhotoBlob } from "./photo-db";
+import { makeThumbnail, resizeForStorage, savePhotoBlob, storageUsage } from "./photo-db";
 import { useStore } from "../store/store";
 import { useSaveStatus } from "../store/save-status";
 import type { Photo } from "../domain/types";
@@ -24,13 +24,15 @@ export async function persistPhoto(
   status.beginPhoto();
   try {
     const id = uid();
-    const thumb = await makeThumbnail(file);
-    await savePhotoBlob(id, file, thumb);
+    const stored = await resizeForStorage(file);
+    const thumb = await makeThumbnail(stored);
+    await savePhotoBlob(id, stored, thumb);
     useStore.getState().addPhotoRecord({
-      id, ...meta, fileName: file.name || "photo.jpg", mimeType: file.type || "image/jpeg", sizeBytes: file.size,
+      id, ...meta, fileName: file.name || "photo.jpg", mimeType: stored.type || file.type || "image/jpeg", sizeBytes: stored.size,
       capturedAt: new Date(file.lastModified || Date.now()).toISOString(),
     });
-    useSaveStatus.getState().endPhoto(null);
+    const use = await storageUsage();
+    useSaveStatus.getState().endPhoto(null, use && use.ratio > 0.85 ? `Saved, but device storage for InfraReport is ${Math.round(use.ratio * 100)}% full. Download a backup and free space soon.` : null);
     return id;
   } catch (e) {
     const msg = e instanceof Error ? e.message : "Photo could not be saved";

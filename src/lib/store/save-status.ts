@@ -9,8 +9,9 @@ interface SaveStatus {
   error: string | null;
   pendingPhotoWrites: number;
   photoError: string | null;
+  storageWarning: string | null;
   beginPhoto(): void;
-  endPhoto(error?: string | null): void;
+  endPhoto(error?: string | null, warning?: string | null): void;
 }
 
 export const useSaveStatus = create<SaveStatus>((set) => ({
@@ -18,8 +19,9 @@ export const useSaveStatus = create<SaveStatus>((set) => ({
   error: null,
   pendingPhotoWrites: 0,
   photoError: null,
+  storageWarning: null,
   beginPhoto: () => set((s) => ({ pendingPhotoWrites: s.pendingPhotoWrites + 1, photoError: null })),
-  endPhoto: (error = null) => set((s) => ({ pendingPhotoWrites: Math.max(0, s.pendingPhotoWrites - 1), photoError: error })),
+  endPhoto: (error = null, warning = null) => set((s) => ({ pendingPhotoWrites: Math.max(0, s.pendingPhotoWrites - 1), photoError: error, storageWarning: warning ?? s.storageWarning })),
 }));
 
 /**

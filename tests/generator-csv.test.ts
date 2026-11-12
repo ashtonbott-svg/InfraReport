@@ -12,7 +12,7 @@ const EXPECTED = [
   "IR Image Number", "Visual Image Number", "Emissivity", "Max Temp", "Ambient Temp", "Opened", "Confidence", "Review Notes",
 ];
 
-const insp: Inspection = { id: "i1", organizationId: "o", customerId: "c", facilityId: "f", date: "2026-03-10", inspectorId: "u", status: "In Progress", defaultEmissivity: DEFAULT_EMISSIVITY, notes: "", createdAt: "", updatedAt: "", siteVisit: newSiteVisit() };
+const insp: Inspection = { id: "i1", organizationId: "o", customerId: "c", facilityId: "f", date: "2026-03-10", inspectorIds: ["u"], status: "In Progress", defaultEmissivity: DEFAULT_EMISSIVITY, notes: "", createdAt: "", updatedAt: "", siteVisit: newSiteVisit() };
 const loc1: Location = { id: "l1", organizationId: "o", facilityId: "f", building: "", name: "Electrical Room 1", area: "", sortOrder: 1 };
 const loc2: Location = { id: "l2", organizationId: "o", facilityId: "f", building: "Building B", name: "MCC Room", area: "", sortOrder: 2 };
 const room1: InspectionRoomConditions = { id: "rc1", organizationId: "o", inspectionId: "i1", locationId: "l1", humidity: "45", ambientTemp: "74", backgroundTemp: "73", distance: "4", imageDate: "" };
@@ -20,7 +20,7 @@ const room2: InspectionRoomConditions = { id: "rc2", organizationId: "o", inspec
 const eq = (id: string, name: string, locationId = "l1"): Equipment => ({ id, organizationId: "o", facilityId: "f", locationId, name, equipmentType: "Panel", defaultComponent: "Full Panel", active: true, sortOrder: 1, createdAt: "" });
 let n = 0;
 const res = (equipmentId: string, patch: Partial<InspectionResult> = {}): InspectionResult => ({
-  id: `r${++n}`, organizationId: "o", inspectionId: "i1", equipmentId, locationId: "l1", component: "Full Panel",
+  id: `r${++n}`, organizationId: "o", inspectionId: "i1", equipmentId, locationId: "l1", component: "Full Panel", distance: "",
   irImageNumber: "", visualImageNumber: "", visualFromSinglePhoto: false, maxTemp: "", opened: "Yes, Completely",
   possibleCause: POSSIBLE_CAUSE_NONE, problemNotes: "", confidence: "", reviewNotes: "", overrides: { ...EMPTY_OVERRIDES },
   source: "manual", sortOrder: n, createdAt: "", updatedAt: "", ...patch,

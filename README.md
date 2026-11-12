@@ -12,7 +12,7 @@ Electrical infrared inspection management and reporting. Prototype build.
 ```bash
 npm install
 npm run dev        # http://localhost:3000
-npm test           # 51 tests: CSV layout + golden export, rules, store workflow, site visits, photo storage
+npm test           # 82 tests: CSV layout + golden export across upgrades, import (PDF/Excel/CSV), autocomplete, site visits, photos
 npm run build
 ```
 
@@ -39,6 +39,10 @@ redeploys automatically; other branches get preview deployments.
 | Building exterior photo (camera / upload, per building, required to pause or finish) | Functional, stored on this device only |
 | Pause / resume across days, Resume Inspection on dashboard | Functional on the same device and browser |
 | Offline use after first load (service worker) | Functional; nothing syncs because there is no server yet |
+
+| Import a previous equipment list (text PDF, .xlsx/.xlsm, CSV) with editable review | Functional, parsed on the device |
+| Scanned (image-only) PDF import | Not available: needs OCR, which is not connected. Detected and explained, nothing imported |
+| Equipment photos per item (camera, preview, retake, multiple) | Functional, stored on this device only |
 
 ### Storage limits (prototype)
 

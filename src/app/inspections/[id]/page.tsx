@@ -5,7 +5,7 @@ import { useParams } from "next/navigation";
 import { ArrowRight, ClipboardCheck, ListPlus } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Card, CardBody, CardHeader } from "@/components/ui/card";
-import { Field, Input, Select, Textarea } from "@/components/ui/field";
+import { Field, Input, Textarea } from "@/components/ui/field";
 import { EmptyState, Stat } from "@/components/ui/misc";
 import { InspectionHeader } from "@/components/inspection/inspection-header";
 import { useInspectionBundle, useReviewEvents, useUsers } from "@/lib/store/hooks";
@@ -18,6 +18,7 @@ import { ExteriorCapture, ExteriorChecklist, useFieldState } from "@/components/
 import { useBeginFieldWork } from "@/lib/store/field-actions";
 import { visitDayCount } from "@/lib/domain/site-visit";
 import { Play } from "lucide-react";
+import { ThermographerPicker } from "@/components/forms/thermographer-picker";
 
 export default function InspectionOverviewPage() {
   const { id } = useParams<{ id: string }>();
@@ -82,11 +83,7 @@ export default function InspectionOverviewPage() {
             <CardHeader title="Inspection settings" />
             <CardBody className="grid gap-4 sm:grid-cols-3">
               <Field label="Inspection date" htmlFor="o-date"><Input id="o-date" type="date" value={inspection.date} onChange={(e) => updateInspection(id, { date: e.target.value })} /></Field>
-              <Field label="Inspector" htmlFor="o-insp">
-                <Select id="o-insp" value={inspection.inspectorId} onChange={(e) => updateInspection(id, { inspectorId: e.target.value })}>
-                  {users.map((u) => <option key={u.id} value={u.id}>{u.name}</option>)}
-                </Select>
-              </Field>
+              <div className="sm:col-span-3"><ThermographerPicker idPrefix="o-th" value={inspection.inspectorIds} onChange={(ids) => updateInspection(id, { inspectorIds: ids })} /></div>
               <Field label="Default emissivity" htmlFor="o-em" hint="0.95 unless explicitly changed. Rows can override.">
                 <Input id="o-em" inputMode="decimal" value={inspection.defaultEmissivity} onChange={(e) => updateInspection(id, { defaultEmissivity: e.target.value })} />
               </Field>

@@ -61,6 +61,7 @@ export function QuickAddBar({ inspectionId, locationId, disabled }: { inspection
   const [componentTouched, setComponentTouched] = useState(false);
   const [ir, setIr] = useState("");
   const [vis, setVis] = useState("");
+  const [dist, setDist] = useState("");
   const [opened, setOpened] = useState<string>(DEFAULT_OPENED);
   const nameRef = useRef<HTMLInputElement>(null);
 
@@ -78,10 +79,10 @@ export function QuickAddBar({ inspectionId, locationId, disabled }: { inspection
     if (!locationId) { toast("Select or add a room first", "error"); return; }
     if (!name.trim()) { nameRef.current?.focus(); return; }
     const photos = applySinglePhotoConvention(ir, vis);
-    addResult(inspectionId, locationId, { name: name.trim(), equipmentType: type, component: component.trim(), ...photos, opened });
+    addResult(inspectionId, locationId, { name: name.trim(), equipmentType: type, component: component.trim(), ...photos, opened, distance: dist });
     // Ready for the next item: increment the name, keep type/component/opened, clear photos.
     setName(incrementName(name.trim()));
-    setIr(""); setVis("");
+    setIr(""); setVis(""); setDist("");
     setTimeout(() => { nameRef.current?.focus(); nameRef.current?.select(); }, 0);
   };
   const onKey = (e: KeyboardEvent) => { if (e.key === "Enter") { e.preventDefault(); submit(); } };
@@ -97,8 +98,9 @@ export function QuickAddBar({ inspectionId, locationId, disabled }: { inspection
           {EQUIPMENT_PRESETS.map((p) => <option key={p.type}>{p.type}</option>)}
           <option>{OTHER_EQUIPMENT_TYPE}</option>
         </select>
-        <input id="quick-add-name" ref={nameRef} aria-label="Equipment name" placeholder="Equipment (e.g. Panel P1)" className="h-9 rounded-md border border-slate-700 bg-slate-800 px-3 text-sm placeholder:text-slate-500 focus:border-thermal-500 focus:outline-none md:col-span-3" value={name} onChange={(e) => changeName(e.target.value)} onKeyDown={onKey} disabled={disabled} />
+        <input id="quick-add-name" ref={nameRef} aria-label="Equipment name" placeholder="Equipment (e.g. Panel P1)" className="h-9 rounded-md border border-slate-700 bg-slate-800 px-3 text-sm placeholder:text-slate-500 focus:border-thermal-500 focus:outline-none md:col-span-2" value={name} onChange={(e) => changeName(e.target.value)} onKeyDown={onKey} disabled={disabled} />
         <input aria-label="Component" list="component-suggestions" placeholder="Component" className="h-9 rounded-md border border-slate-700 bg-slate-800 px-3 text-sm placeholder:text-slate-500 focus:border-thermal-500 focus:outline-none md:col-span-2" value={component} onChange={(e) => { setComponent(e.target.value); setComponentTouched(true); }} onKeyDown={onKey} disabled={disabled} />
+        <input aria-label="Distance" placeholder="Dist ft" inputMode="decimal" className="h-9 rounded-md border border-slate-700 bg-slate-800 px-3 text-sm tabular-nums placeholder:text-slate-500 focus:border-thermal-500 focus:outline-none md:col-span-1" value={dist} onChange={(e) => setDist(e.target.value)} onKeyDown={onKey} disabled={disabled} />
         <input aria-label="IR image number" placeholder="IR #" className="h-9 rounded-md border border-slate-700 bg-slate-800 px-3 text-sm tabular-nums placeholder:text-slate-500 focus:border-thermal-500 focus:outline-none md:col-span-1" value={ir} onChange={(e) => setIr(e.target.value)} onKeyDown={onKey} disabled={disabled} />
         <input aria-label="Visual image number" placeholder="Visual #" className="h-9 rounded-md border border-slate-700 bg-slate-800 px-3 text-sm tabular-nums placeholder:text-slate-500 focus:border-thermal-500 focus:outline-none md:col-span-1" value={vis} onChange={(e) => setVis(e.target.value)} onKeyDown={onKey} disabled={disabled} />
         <select aria-label="Opened" className="col-span-2 h-9 rounded-md border border-slate-700 bg-slate-800 px-2 text-sm md:col-span-2" value={opened} onChange={(e) => setOpened(e.target.value)} disabled={disabled}>
@@ -127,7 +129,7 @@ const head = "sticky top-0 z-10 whitespace-nowrap border-b border-slate-200 bg-s
 export function EquipmentGrid({ rows, inspection, causes, showRoomHeaders, locations }: {
   rows: GridRow[]; inspection: Inspection; causes: string[]; showRoomHeaders: boolean; locations: Location[];
 }) {
-  const { updateResult, setOverride, updateEquipment, duplicateResult, deleteResult } = useStore();
+  const { updateResult, updateEquipment, duplicateResult, deleteResult } = useStore();
   const [expanded, setExpanded] = useState<string | null>(null);
 
   const headerAt = rows.map((row, i) => showRoomHeaders && (i === 0 || rows[i - 1].result.locationId !== row.result.locationId));
@@ -178,8 +180,7 @@ export function EquipmentGrid({ rows, inspection, causes, showRoomHeaders, locat
                   </td>
                   <td className={cell}><TextCell label="Component" row={i} col="component" list="component-suggestions" value={r.component} onCommit={(v) => updateResult(r.id, { component: v })} /></td>
                   <td className={cell}>
-                    <TextCell label="Distance" row={i} col="distance" numeric inherited value={r.overrides.distance ?? ""} placeholder={room?.distance ?? ""}
-                      onCommit={(v) => setOverride(r.id, "distance", v.trim() === "" ? null : v)} />
+                    <TextCell label="Distance" row={i} col="distance" numeric value={r.distance ?? ""} onCommit={(v) => updateResult(r.id, { distance: v })} />
                   </td>
                   <td className={cell}><TextCell label="IR image number" row={i} col="ir" numeric value={r.irImageNumber} onCommit={(v) => updateResult(r.id, { irImageNumber: v.trim(), visualFromSinglePhoto: false })} /></td>
                   <td className={cell}><TextCell label="Visual image number" row={i} col="vis" numeric value={r.visualImageNumber} onCommit={(v) => updateResult(r.id, { visualImageNumber: v.trim(), visualFromSinglePhoto: false })} className={r.visualFromSinglePhoto ? "text-amber-700" : ""} /></td>
@@ -255,7 +256,6 @@ function RowDetails({ row, inspection, eff, locations }: { row: GridRow; inspect
           <OverrideField label="Humidity" k="humidity" row={row} inherited={room?.humidity ?? ""} />
           <OverrideField label="Ambient Temp" k="ambientTemp" row={row} inherited={room?.ambientTemp ?? ""} />
           <OverrideField label="Background Temp" k="backgroundTemp" row={row} inherited={room?.backgroundTemp ?? ""} />
-          <OverrideField label="Distance" k="distance" row={row} inherited={room?.distance ?? ""} />
           <OverrideField label="Emissivity" k="emissivity" row={row} inherited={inspection.defaultEmissivity} />
           <OverrideField label="Image Date" k="imageDate" row={row} type="date" inherited={room?.imageDate || inspection.date} />
         </div>

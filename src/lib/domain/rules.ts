@@ -42,12 +42,16 @@ export function presetForType(type: string): EquipmentPreset | undefined {
 
 /** Guess an equipment type from a name like "Panel P1", "XFMR T1" or "DISC D1". */
 export function inferTypeFromName(name: string): string | undefined {
-  const first = name.trim().toLowerCase().split(/[\s\-_#]+/)[0] ?? "";
-  if (!first) return undefined;
-  for (const p of EQUIPMENT_PRESETS) {
-    if (p.aliases.includes(first)) return p.type;
-  }
-  return undefined;
+  const tokens = name.trim().toLowerCase().split(/[\s\-_#/,()]+/).filter(Boolean);
+  if (!tokens.length) return undefined;
+  const byAlias = (t: string) => EQUIPMENT_PRESETS.find((p) => p.aliases.includes(t))?.type;
+  const first = byAlias(tokens[0]);
+  if (first && first !== "MCC") return first;
+  // "Main Switchgear MSG", "Lighting Contactor LC-1", "MCC-1 Starter 3": use a
+  // full type word later in the name (not short abbreviations like "lp" or "cb").
+  const FULL = new Set(["panel", "transformer", "xfmr", "disconnect", "cabinet", "starter", "breaker", "contactor", "switchgear", "swgr"]);
+  for (const t of tokens.slice(1).reverse()) if (FULL.has(t)) return byAlias(t);
+  return first;
 }
 
 export function defaultComponentForType(type: string): string {
@@ -94,7 +98,7 @@ export interface EffectiveValues {
  * date. Emissivity falls back to the inspection default, then 0.95.
  */
 export function resolveEffective(
-  result: Pick<InspectionResult, "overrides">,
+  result: Pick<InspectionResult, "overrides"> & { distance?: string },
   room: Pick<InspectionRoomConditions, "humidity" | "ambientTemp" | "backgroundTemp" | "distance" | "imageDate"> | undefined,
   inspection: Pick<Inspection, "date" | "defaultEmissivity">,
 ): EffectiveValues {
@@ -113,7 +117,9 @@ export function resolveEffective(
     humidity: pick("humidity", room?.humidity ?? ""),
     backgroundTemp: pick("backgroundTemp", room?.backgroundTemp ?? ""),
     ambientTemp: pick("ambientTemp", room?.ambientTemp ?? ""),
-    distance: pick("distance", room?.distance ?? ""),
+    // Distance belongs to each equipment record (release 3). Legacy override /
+    // room values are only read if a record was never migrated.
+    distance: result.distance !== undefined && result.distance !== "" ? result.distance : pick("distance", room?.distance ?? ""),
     emissivity: pick("emissivity", inspection.defaultEmissivity || DEFAULT_EMISSIVITY),
     overridden,
   };

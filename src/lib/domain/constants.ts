@@ -69,6 +69,8 @@ export const EQUIPMENT_PRESETS: EquipmentPreset[] = [
   { type: "Contactor", defaultComponent: "Full Contactor", aliases: ["contactor", "cont"] },
   // Switchgear uses Full Panel unless a more specific component is recorded.
   { type: "Switchgear", defaultComponent: "Full Panel", aliases: ["switchgear", "swgr", "swg"] },
+  // No established component default for MCC yet; the inspector enters it.
+  { type: "MCC", defaultComponent: "", aliases: ["mcc"] },
 ];
 
 export const OTHER_EQUIPMENT_TYPE = "Other";

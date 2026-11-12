@@ -11,12 +11,13 @@ import { useCustomers, useFacilities, useUsers } from "@/lib/store/hooks";
 import { useStore } from "@/lib/store/store";
 import { formatDate } from "@/lib/format";
 import { toast } from "@/components/ui/toast";
+import { inspectorNames } from "@/components/forms/thermographer-picker";
 
 export function InspectionHeader({ inspection, errorCount }: { inspection: Inspection; errorCount: number }) {
   const pathname = usePathname();
   const customer = useCustomers().find((c) => c.id === inspection.customerId);
   const facility = useFacilities().find((f) => f.id === inspection.facilityId);
-  const inspector = useUsers().find((u) => u.id === inspection.inspectorId);
+  const inspector = inspectorNames(inspection.inspectorIds, useUsers());
   const setStatus = useStore((s) => s.setInspectionStatus);
   const base = `/inspections/${inspection.id}`;
   const tabs = [
@@ -46,7 +47,7 @@ export function InspectionHeader({ inspection, errorCount }: { inspection: Inspe
           <div className="mt-1 flex flex-wrap items-center gap-x-3 gap-y-1 text-sm text-slate-500">
             <span>{formatDate(inspection.date)}</span>
             <span className="text-slate-300">•</span>
-            <span>{inspector?.name}</span>
+            <span className={inspection.inspectorIds.length ? "" : "font-medium text-amber-700"}>{inspector}</span>
             <StatusBadge status={inspection.status} />
           </div>
         </div>

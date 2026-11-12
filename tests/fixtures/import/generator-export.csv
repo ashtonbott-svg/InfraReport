@@ -1,0 +1,5 @@
+﻿Image Date,Location,Humidity,Background Temp,Equipment,Component,Distance,Possible Cause,IR Image Number,Visual Image Number,Emissivity,Max Temp,Ambient Temp,Opened,Confidence,Review Notes
+03/11/2025,Building A - Electrical Room 1,45,73,Panel P1,Full Panel,4,NONE,1021,1022,0.95,86.2,74,"Yes, Completely",,
+03/11/2025,Building A - Electrical Room 1,45,73,Panel P2,Circuit 11,4,Loose Connection(s),1023,1024,0.95,131.7,74,"Yes, Completely",,
+03/11/2025,Building A - Electrical Room 1,45,73,Panel P2,Full Panel,4,NONE,1025,1026,0.95,,74,"Yes, Completely",,
+03/11/2025,Electrical Room 2,50,78,Disconnect D1,Full Disconnect,,NONE,,,0.95,,80,Item is Locked Out,,

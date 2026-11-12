@@ -9,6 +9,8 @@ import { StatusBadge } from "@/components/ui/badge";
 import { EmptyState, PageHeader, Stat, Table, td, th } from "@/components/ui/misc";
 import { INSPECTION_STATUSES } from "@/lib/domain/constants";
 import { ResumeInspections } from "@/components/field/resume-card";
+import { DemoDataNotice } from "@/components/field/demo-data-notice";
+import { inspectorNames } from "@/components/forms/thermographer-picker";
 import { formatDate, formatDateTime, plural } from "@/lib/format";
 import {
   useCustomers, useEquipment, useFacilities, useInspections, useResults, useReviewEvents, useUsers,
@@ -48,6 +50,7 @@ export default function DashboardPage() {
         }
       />
 
+      <DemoDataNotice />
       <ResumeInspections />
 
       <div className="grid grid-cols-2 gap-3 lg:grid-cols-4">
@@ -98,7 +101,7 @@ export default function DashboardPage() {
                         <div className="text-xs text-slate-500">{name(i.customerId, customers)}</div>
                       </td>
                       <td className={`${td} whitespace-nowrap`}>{formatDate(i.date)}</td>
-                      <td className={`${td} whitespace-nowrap`}>{name(i.inspectorId, users)}</td>
+                      <td className={`${td} whitespace-nowrap`}>{inspectorNames(i.inspectorIds, users)}</td>
                       <td className={`${td} tabular-nums`}>{count}</td>
                       <td className={td}><StatusBadge status={i.status} /></td>
                       <td className={`${td} text-right`}>

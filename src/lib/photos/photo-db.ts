@@ -84,6 +84,41 @@ export async function requestPersistentStorage(): Promise<boolean> {
   return false;
 }
 
+/**
+ * Reduce very large camera images (e.g. 12 MP, 4-8 MB) to at most `max` pixels
+ * on the long side as JPEG. Plenty for equipment identification and reports,
+ * and about a tenth of the storage. Returns the original when it is already
+ * small or the browser cannot decode it.
+ */
+export async function resizeForStorage(file: Blob, max = 2400, quality = 0.85): Promise<Blob> {
+  try {
+    if (typeof createImageBitmap === "undefined" || typeof document === "undefined") return file;
+    const bmp = await createImageBitmap(file);
+    const scale = Math.min(1, max / Math.max(bmp.width, bmp.height));
+    if (scale >= 1 && file.size < 2.5 * 1024 * 1024) { bmp.close?.(); return file; }
+    const canvas = document.createElement("canvas");
+    canvas.width = Math.round(bmp.width * scale);
+    canvas.height = Math.round(bmp.height * scale);
+    canvas.getContext("2d")?.drawImage(bmp, 0, 0, canvas.width, canvas.height);
+    bmp.close?.();
+    const out = await new Promise<Blob | null>((res) => canvas.toBlob((b) => res(b), "image/jpeg", quality));
+    return out && out.size < file.size ? out : file;
+  } catch {
+    return file;
+  }
+}
+
+/** Fraction of this site's storage quota in use, when the browser reports it. */
+export async function storageUsage(): Promise<{ usage: number; quota: number; ratio: number } | null> {
+  try {
+    if (typeof navigator === "undefined" || !navigator.storage?.estimate) return null;
+    const { usage = 0, quota = 0 } = await navigator.storage.estimate();
+    return quota ? { usage, quota, ratio: usage / quota } : null;
+  } catch {
+    return null;
+  }
+}
+
 /** Downscaled JPEG preview for lists. Returns null when the browser cannot decode the image (e.g. HEIC outside Safari). */
 export async function makeThumbnail(file: Blob, max = 480): Promise<Blob | null> {
   try {

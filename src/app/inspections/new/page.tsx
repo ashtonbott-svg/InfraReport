@@ -9,8 +9,9 @@ import { Card, CardBody, CardHeader } from "@/components/ui/card";
 import { Field, Input, Select, Textarea } from "@/components/ui/field";
 import { PageHeader } from "@/components/ui/misc";
 import { CustomerFormModal, FacilityFormModal } from "@/components/forms/entity-forms";
+import { ThermographerPicker } from "@/components/forms/thermographer-picker";
 import { toast } from "@/components/ui/toast";
-import { useCustomers, useEquipment, useFacilities, useInspections, useLocations, useUsers } from "@/lib/store/hooks";
+import { useCustomers, useEquipment, useFacilities, useInspections, useLocations } from "@/lib/store/hooks";
 import { useStore } from "@/lib/store/store";
 import { useBeginFieldWork } from "@/lib/store/field-actions";
 import { formatDate, plural, todayISO } from "@/lib/format";
@@ -23,8 +24,6 @@ function NewInspectionForm() {
   const equipment = useEquipment();
   const locations = useLocations();
   const inspections = useInspections();
-  const users = useUsers();
-  const currentUserId = useStore((s) => s.currentUserId);
   const createInspection = useStore((s) => s.createInspection);
   const begin = useBeginFieldWork();
   const activeId = useStore((s) => s.activeInspectionId);
@@ -32,7 +31,7 @@ function NewInspectionForm() {
   const [customerId, setCustomerId] = useState(params.get("customer") ?? "");
   const [facilityChoice, setFacilityId] = useState(params.get("facility") ?? "");
   const [date, setDate] = useState(todayISO());
-  const [inspectorId, setInspectorId] = useState(currentUserId);
+  const [inspectorIds, setInspectorIds] = useState<string[]>([]);
   const [carryForward, setCarryForward] = useState(true);
   const [notes, setNotes] = useState("");
   const [startNow, setStartNow] = useState(true);
@@ -46,12 +45,12 @@ function NewInspectionForm() {
   const eqCount = equipment.filter((e) => e.facilityId === facilityId && e.active).length;
   const roomCount = locations.filter((l) => l.facilityId === facilityId).length;
   const last = inspections.filter((i) => i.facilityId === facilityId).sort((a, b) => b.date.localeCompare(a.date))[0];
-  const valid = customerId && facilityId && date && inspectorId;
+  const valid = customerId && facilityId && date && inspectorIds.length > 0;
 
   const submit = (e: FormEvent) => {
     e.preventDefault();
     if (!valid) return;
-    const id = createInspection({ customerId, facilityId, date, inspectorId, carryForward: carryForward && eqCount + roomCount > 0, notes });
+    const id = createInspection({ customerId, facilityId, date, inspectorIds, carryForward: carryForward && eqCount + roomCount > 0, notes });
     toast("Inspection created");
     if (startNow && !activeId) begin(id);
     else router.push(`/inspections/${id}/entry`);
@@ -83,11 +82,7 @@ function NewInspectionForm() {
               </div>
             </Field>
             <Field label="Inspection date *" htmlFor="ni-date"><Input id="ni-date" type="date" value={date} onChange={(e) => setDate(e.target.value)} /></Field>
-            <Field label="Inspector *" htmlFor="ni-insp">
-              <Select id="ni-insp" value={inspectorId} onChange={(e) => setInspectorId(e.target.value)}>
-                {users.map((u) => <option key={u.id} value={u.id}>{u.name}{u.certification ? ` (${u.certification})` : ""}</option>)}
-              </Select>
-            </Field>
+            <div className="sm:col-span-2"><ThermographerPicker idPrefix="ni-th" value={inspectorIds} onChange={setInspectorIds} /></div>
             <Field label="Notes" className="sm:col-span-2" htmlFor="ni-notes"><Textarea id="ni-notes" value={notes} onChange={(e) => setNotes(e.target.value)} placeholder="Scope, contacts on site, special conditions" /></Field>
           </CardBody>
         </Card>

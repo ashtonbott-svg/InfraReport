@@ -12,6 +12,7 @@ import { EmptyState, PageHeader, Table, td, th } from "@/components/ui/misc";
 import { INSPECTION_STATUSES } from "@/lib/domain/constants";
 import { useCustomers, useFacilities, useInspections, useResults, useUsers } from "@/lib/store/hooks";
 import { formatDate } from "@/lib/format";
+import { inspectorNames } from "@/components/forms/thermographer-picker";
 
 function InspectionsList() {
   const params = useSearchParams();
@@ -30,7 +31,7 @@ function InspectionsList() {
         i,
         customer: customers.find((c) => c.id === i.customerId)?.name ?? "",
         facility: facilities.find((f) => f.id === i.facilityId)?.name ?? "",
-        inspector: users.find((u) => u.id === i.inspectorId)?.name ?? "",
+        inspector: inspectorNames(i.inspectorIds, users),
         count: results.filter((r) => r.inspectionId === i.id).length,
       }))
       .filter((r) => (!status || r.i.status === status) && (!s || [r.customer, r.facility, r.inspector].some((x) => x.toLowerCase().includes(s))))

@@ -12,7 +12,7 @@ const photo = (inspectionId: string, building: string, kind: Photo["kind"] = "ex
 function newJob() {
   const customerId = S().createCustomer({ name: "Brim Laundry (fictional)", contactName: "", contactEmail: "", contactPhone: "", notes: "" });
   const facilityId = S().createFacility({ customerId, name: "Main Plant", address: "", city: "", state: "", postalCode: "", notes: "" });
-  const id = S().createInspection({ customerId, facilityId, date: "2026-11-09", inspectorId: "user-1", carryForward: false });
+  const id = S().createInspection({ customerId, facilityId, date: "2026-11-09", inspectorIds: ["user-ashton"], carryForward: false });
   return { id, facilityId };
 }
 

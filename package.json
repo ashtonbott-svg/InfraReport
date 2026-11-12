@@ -8,14 +8,19 @@
     "start": "next start",
     "lint": "eslint",
     "test": "vitest run",
-    "typecheck": "next typegen && tsc --noEmit"
+    "typecheck": "next typegen && tsc --noEmit",
+    "copy-pdf-worker": "node -e \"require('fs').copyFileSync('node_modules/pdfjs-dist/build/pdf.worker.min.mjs','public/pdf.worker.min.mjs')\"",
+    "prebuild": "npm run copy-pdf-worker",
+    "predev": "npm run copy-pdf-worker"
   },
   "dependencies": {
     "clsx": "^2.1.1",
     "lucide-react": "^1.70.0",
     "next": "16.4.6",
+    "pdfjs-dist": "^6.5.438",
     "react": "19.3.0",
     "react-dom": "19.3.0",
+    "read-excel-file": "^9.3.15",
     "zustand": "^5.1.0"
   },
   "devDependencies": {

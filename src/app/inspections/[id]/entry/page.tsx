@@ -27,6 +27,7 @@ import { LIMITED_ACCESS_OPENED, POSSIBLE_CAUSE_NONE } from "@/lib/domain/constan
 import { defaultComponentForType } from "@/lib/domain/rules";
 import { locationLabel } from "@/lib/domain/csv";
 import { formatDateTime } from "@/lib/format";
+import { usePhotoUrl } from "@/lib/photos/use-photo-url";
 import type { Equipment, Location } from "@/lib/domain/types";
 
 type RowFilter = "all" | "problems" | "missing-image" | "limited" | "overrides" | "single-photo";
@@ -66,8 +67,21 @@ const SHORT_OPENED: Record<string, string> = {
   "Equipment Inaccessible Due to Obstruction(s) in Front of Panel": "Obstructed",
 };
 
-function EquipmentCard({ row, onOpen, photoCount }: { row: GridRow; onOpen: () => void; photoCount: number }) {
+function CardThumb({ photoId }: { photoId: string | null }) {
+  const { url } = usePhotoUrl(photoId);
+  if (!photoId) return null;
+  // eslint-disable-next-line @next/next/no-img-element
+  return <div className="h-14 w-14 shrink-0 overflow-hidden rounded-lg bg-slate-100">{url ? <img src={url} alt="" className="h-full w-full object-cover" /> : null}</div>;
+}
+
+/** An item counts as recorded once something was captured for it this visit. */
+function isRecorded(r: GridRow["result"], photoCount: number): boolean {
+  return !!(r.irImageNumber || r.visualImageNumber || r.distance || photoCount || LIMITED_ACCESS_OPENED.includes(r.opened) || r.maxTemp);
+}
+
+function EquipmentCard({ row, onOpen, photoCount, firstPhotoId }: { row: GridRow; onOpen: () => void; photoCount: number; firstPhotoId: string | null }) {
   const r = row.result;
+  const recorded = isRecorded(r, photoCount);
   const problem = r.possibleCause && r.possibleCause !== POSSIBLE_CAUSE_NONE;
   const limited = LIMITED_ACCESS_OPENED.includes(r.opened);
   const noImage = !r.irImageNumber && !r.visualImageNumber && !limited;
@@ -75,17 +89,20 @@ function EquipmentCard({ row, onOpen, photoCount }: { row: GridRow; onOpen: () =
     <button onClick={onOpen} data-result-id={r.id}
       className={cn("flex w-full items-stretch gap-3 rounded-xl border bg-white p-3 text-left shadow-xs active:bg-slate-50",
         problem ? "border-thermal-300 ring-1 ring-thermal-200" : "border-slate-200")}>
-      <div className={cn("w-1 shrink-0 rounded-full", problem ? "bg-thermal-500" : limited ? "bg-amber-400" : noImage ? "bg-slate-200" : "bg-emerald-500")} />
+      <div className={cn("w-1 shrink-0 rounded-full", problem ? "bg-thermal-500" : limited ? "bg-amber-400" : recorded ? "bg-emerald-500" : "bg-slate-200")} />
+      <CardThumb photoId={firstPhotoId} />
       <div className="min-w-0 flex-1">
         <div className="flex items-baseline justify-between gap-2">
           <span className="truncate text-base font-semibold text-slate-900">{row.equipment?.name || "(unnamed)"}</span>
-          {r.maxTemp ? <span className="shrink-0 text-sm font-semibold tabular-nums text-slate-900">{r.maxTemp}°F</span> : null}
+          {r.maxTemp ? <span className="shrink-0 text-sm font-semibold tabular-nums text-slate-900">{r.maxTemp}°F</span>
+            : recorded ? <CheckCircle2 className="h-4 w-4 shrink-0 text-emerald-600" aria-label="Recorded" /> : <span className="shrink-0 text-[11px] font-medium text-slate-400">To do</span>}
         </div>
         <div className="truncate text-sm text-slate-600">{r.component || <span className="text-slate-400">No component</span>}</div>
         <div className="mt-1.5 flex flex-wrap gap-1.5 text-xs">
           <span className={cn("rounded-md px-1.5 py-0.5 tabular-nums", noImage ? "bg-slate-100 text-slate-400" : "bg-slate-100 text-slate-700")}>
             IR {r.irImageNumber || "?"} · Vis {r.visualImageNumber || "?"}{r.visualFromSinglePhoto ? " *" : ""}
           </span>
+          {r.distance ? <span className="rounded-md bg-slate-100 px-1.5 py-0.5 tabular-nums text-slate-700">{r.distance} ft</span> : null}
           <span className={cn("rounded-md px-1.5 py-0.5", limited ? "bg-amber-100 text-amber-900" : "bg-slate-100 text-slate-600")}>{SHORT_OPENED[r.opened] ?? r.opened}</span>
           {problem ? <span className="rounded-md bg-thermal-100 px-1.5 py-0.5 font-medium text-thermal-800">{r.possibleCause}</span> : null}
           {photoCount ? <span className="inline-flex items-center gap-1 rounded-md bg-sky-50 px-1.5 py-0.5 text-sky-700"><Camera className="h-3 w-3" />{photoCount}</span> : null}
@@ -205,6 +222,21 @@ function EntryWorkspace() {
   const lastType = lastEq?.equipmentType ?? "Panel";
   const createDefaults = { name: suggestions[0] ?? "", type: lastType, component: defaultComponentForType(lastType) || (lastEq ? dataset.results.find((r) => r.equipmentId === lastEq.id)?.component ?? "" : "Full Panel") };
   const photoCount = (rid: string) => photos.filter((p) => p.resultId === rid).length;
+  const firstPhoto = (rid: string) => photos.find((p) => p.resultId === rid)?.id ?? null;
+  const facilityNames = allEquipment.filter((e) => e.facilityId === inspection.facilityId).map((e) => e.name);
+  const recordedInRoom = gridRows.filter((g) => isRecorded(g.result, photoCount(g.result.id))).length;
+  // Walk-through: at the end of a room, offer the next room's first item.
+  const roomIdx = rooms.findIndex((r) => r.location.id === selected);
+  const nextRoom = roomIdx >= 0 ? rooms.slice(roomIdx + 1).find((r) => r.count > 0) : undefined;
+  const onEndOfList = selected !== "all" && nextRoom && !filtered ? {
+    label: `Next Room: ${nextRoom.location.name}`,
+    go: () => {
+      const first = dataset.results.filter((r) => r.locationId === nextRoom.location.id).sort((a, b) => a.sortOrder - b.sortOrder)[0];
+      selectRoom(nextRoom.location.id);
+      if (first) setEditId(first.id); else setSheet(null);
+      toast(`Now in ${nextRoom.location.name}`);
+    },
+  } : null;
 
   const onRoomCreated = (locationId: string, building: string) => {
     const wasRequired = field.required.includes(building);
@@ -247,14 +279,17 @@ function EntryWorkspace() {
 
   const sheets = (
     <>
-      <AddRoomSheet open={sheet === "add-room"} onClose={() => setSheet(null)} inspectionId={inspection.id} previous={current ?? rooms[rooms.length - 1] ?? null} knownBuildings={field.knownBuildings} onCreated={onRoomCreated} />
+      <AddRoomSheet open={sheet === "add-room"} onClose={() => setSheet(null)} inspectionId={inspection.id} previous={current ?? rooms[rooms.length - 1] ?? null} knownBuildings={field.knownBuildings} onCreated={onRoomCreated}
+        facilityRooms={locations.filter((l) => l.facilityId === inspection.facilityId).map((l) => ({ id: l.id, name: l.name, building: l.building, inInspection: usedLocationIds.has(l.id) }))}
+        onUseExisting={(locId) => { addExistingRoom(locId); toast("Existing room added. Enter its conditions."); }} />
       <RoomPickerSheet open={sheet === "pick-room"} onClose={() => setSheet(null)} rooms={rooms} selected={selected} total={dataset.results.length}
         onSelect={(l) => { selectRoom(l); setSheet(null); }} onAddRoom={() => setSheet("add-room")} otherRooms={otherRooms} onAddExisting={addExistingRoom} />
       <RoomConditionsSheet open={sheet === "conditions"} onClose={() => setSheet(null)} info={current} inspectionDate={inspection.date} knownBuildings={field.knownBuildings} />
       {sheet === "add-eq" || sheet === "edit-eq" ? (
         <EquipmentSheet open mode={sheet === "add-eq" ? "create" : "edit"} onClose={() => setSheet(null)} inspection={inspection}
           locationId={current?.location.id ?? null} room={current?.room ?? (editId ? dataset.rooms.find((x) => x.locationId === dataset.results.find((r) => r.id === editId)?.locationId) : undefined)}
-          rows={gridRows} editId={editId} onNavigate={(rid) => setEditId(rid)} defaults={createDefaults} suggestions={suggestions} />
+          rows={gridRows} editId={editId} onNavigate={(rid) => setEditId(rid)} defaults={createDefaults} suggestions={suggestions}
+          facilityNames={facilityNames} onEndOfList={onEndOfList} />
       ) : null}
     </>
   );
@@ -286,7 +321,10 @@ function EntryWorkspace() {
               <div className="mt-1 flex items-stretch gap-2">
                 <button onClick={() => setSheet("pick-room")} className="flex min-h-12 min-w-0 flex-1 items-center gap-2 rounded-lg bg-slate-100 px-3 text-left active:bg-slate-200" aria-label="Switch room">
                   <MapPin className="h-5 w-5 shrink-0 text-thermal-600" />
-                  <span className="min-w-0 flex-1 truncate text-base font-semibold text-slate-900">{current ? locationLabel(current.location) : `All rooms (${dataset.results.length})`}</span>
+                  <span className="min-w-0 flex-1 leading-tight">
+                    {current?.location.building ? <span className="block truncate text-[11px] font-medium text-slate-500">{current.location.building}</span> : null}
+                    <span className="block truncate text-base font-semibold text-slate-900">{current ? current.location.name : `All rooms (${dataset.results.length})`}</span>
+                  </span>
                   <ChevronDown className="h-5 w-5 shrink-0 text-slate-500" />
                 </button>
                 <Button variant="primary" className="h-auto min-h-12 shrink-0 px-4 text-base" onClick={() => setSheet("add-room")}><Plus className="h-5 w-5" />Add Room</Button>
@@ -319,6 +357,12 @@ function EntryWorkspace() {
                 </div>
               ) : null}
 
+              {gridRows.length && selected !== "all" ? (
+                <div className="flex items-center gap-2 px-1 text-xs text-slate-600">
+                  <div className="h-1.5 flex-1 overflow-hidden rounded-full bg-slate-200"><div className="h-full rounded-full bg-emerald-500" style={{ width: `${Math.round((recordedInRoom / gridRows.length) * 100)}%` }} /></div>
+                  <span className="tabular-nums">{recordedInRoom} of {gridRows.length} recorded</span>
+                </div>
+              ) : null}
               {gridRows.length === 0 ? (
                 <div className="rounded-xl border border-dashed border-slate-300 px-4 py-8 text-center text-sm text-slate-500">
                   {filtered ? "No equipment matches." : "No equipment in this room yet. Tap Add Equipment below."}
@@ -330,7 +374,7 @@ function EntryWorkspace() {
                     return (
                       <div key={row.result.id}>
                         {header ? <div className="px-1 pb-1 pt-3 text-xs font-semibold uppercase tracking-wide text-slate-500">{locationLabel(row.location)}</div> : null}
-                        <EquipmentCard row={row} photoCount={photoCount(row.result.id)} onOpen={() => { setEditId(row.result.id); setSheet("edit-eq"); }} />
+                        <EquipmentCard row={row} photoCount={photoCount(row.result.id)} firstPhotoId={firstPhoto(row.result.id)} onOpen={() => { setEditId(row.result.id); setSheet("edit-eq"); }} />
                       </div>
                     );
                   })}

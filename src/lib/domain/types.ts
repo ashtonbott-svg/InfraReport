@@ -94,6 +94,10 @@ export interface Equipment {
   name: string; // e.g. "Panel P1"
   equipmentType: string; // preset key or free text
   defaultComponent: string;
+  /** Permanent identifiers from an imported list (asset tag, serial, etc.). */
+  identifiers?: string;
+  /** File the record was imported from, if any. */
+  importedFrom?: string;
   active: boolean;
   sortOrder: number;
   createdAt: ISODateTime;
@@ -113,7 +117,8 @@ export interface Inspection {
   customerId: ID;
   facilityId: ID;
   date: ISODate;
-  inspectorId: ID;
+  /** Thermographers on this inspection (one or more). */
+  inspectorIds: ID[];
   status: InspectionStatus;
   defaultEmissivity: NumericText;
   notes: string;
@@ -149,6 +154,7 @@ export interface InspectionRoomConditions {
   humidity: NumericText;
   ambientTemp: NumericText;
   backgroundTemp: NumericText;
+  /** Legacy (schema v2). Distance is now recorded per equipment; always "". */
   distance: NumericText;
   imageDate: ISODate | ""; // blank = inspection date
 }
@@ -161,6 +167,7 @@ export interface ResultOverrides {
   humidity: NumericText | null;
   ambientTemp: NumericText | null;
   backgroundTemp: NumericText | null;
+  /** Legacy (schema v2). Distance moved to InspectionResult.distance; always null. */
   distance: NumericText | null;
   imageDate: ISODate | null;
   emissivity: NumericText | null;
@@ -176,6 +183,8 @@ export interface InspectionResult {
   equipmentId: ID;
   locationId: ID; // where it was inspected this time
   component: string;
+  /** Distance to this equipment in feet, recorded per item. */
+  distance: NumericText;
   irImageNumber: string;
   visualImageNumber: string;
   /** True when the Visual number was copied from a single recorded photo number. */

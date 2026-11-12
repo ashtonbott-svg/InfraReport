@@ -11,7 +11,7 @@ import { useOnline } from "@/lib/use-online";
  * no server sync yet, so "offline" never implies pending uploads.
  */
 export function SaveIndicator({ dark, className }: { dark?: boolean; className?: string }) {
-  const { lastSavedAt, error, pendingPhotoWrites, photoError } = useSaveStatus();
+  const { lastSavedAt, error, pendingPhotoWrites, photoError, storageWarning } = useSaveStatus();
   const online = useOnline();
   const [flash, setFlash] = useState(false);
   useEffect(() => {
@@ -28,6 +28,10 @@ export function SaveIndicator({ dark, className }: { dark?: boolean; className?:
     icon = <AlertTriangle className="h-3.5 w-3.5" />;
     text = error ?? `Photo not saved: ${photoError}`;
     tone = dark ? "text-red-300" : "text-red-700";
+  } else if (storageWarning && !(pendingPhotoWrites > 0 || flash)) {
+    icon = <AlertTriangle className="h-3.5 w-3.5" />;
+    text = storageWarning;
+    tone = dark ? "text-amber-300" : "text-amber-700";
   } else if (pendingPhotoWrites > 0 || flash) {
     icon = <Loader2 className="h-3.5 w-3.5 animate-spin" />;
     text = "Saving…";

@@ -5,7 +5,7 @@
  * Inspection data itself never goes through here; it lives on the device
  * (localStorage + IndexedDB) and is not uploaded anywhere.
  */
-const CACHE = "infrareport-v2";
+const CACHE = "infrareport-v3";
 const SHELL = ["/", "/manifest.webmanifest", "/icon-192.png", "/icon-512.png"];
 
 self.addEventListener("install", (event) => {
@@ -55,7 +55,7 @@ self.addEventListener("fetch", (event) => {
   if (req.method !== "GET") return;
   const url = new URL(req.url);
   if (url.origin !== self.location.origin) return;
-  if (url.pathname.startsWith("/_next/static/") || /\.(png|ico|svg|woff2?)$/.test(url.pathname)) {
+  if (url.pathname.startsWith("/_next/static/") || /\.(png|ico|svg|woff2?|mjs)$/.test(url.pathname)) {
     event.respondWith(cacheFirst(req));
     return;
   }

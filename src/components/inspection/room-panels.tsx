@@ -1,7 +1,7 @@
 "use client";
 
 import { useDraft } from "@/lib/use-draft";
-import { Plus, Thermometer, Droplets, Ruler, CalendarDays, Wind } from "lucide-react";
+import { Plus, Thermometer, Droplets, CalendarDays, Wind } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
 import { Input, Select } from "@/components/ui/field";
@@ -99,11 +99,10 @@ export function RoomConditionsCard({ entry, results, inspectionDate }: { entry: 
           <p className="text-xs text-slate-500">Room conditions carry down to {results.length} item{results.length === 1 ? "" : "s"}{overrides ? ` · ${overrides} with row overrides` : ""}.</p>
         </div>
       </div>
-      <div className="grid grid-cols-2 gap-3 px-4 pb-4 pt-3 sm:grid-cols-3 xl:grid-cols-5">
+      <div className="grid grid-cols-2 gap-3 px-4 pb-4 pt-3 sm:grid-cols-3 xl:grid-cols-4">
         <CondInput id={`h-${room.id}`} label="Humidity" icon={<Droplets className="h-3.5 w-3.5" />} suffix="%" value={room.humidity} onCommit={commit("humidity")} />
         <CondInput id={`a-${room.id}`} label="Ambient Temp" icon={<Thermometer className="h-3.5 w-3.5" />} suffix="°F" value={room.ambientTemp} onCommit={commit("ambientTemp")} />
         <CondInput id={`b-${room.id}`} label="Background Temp" icon={<Wind className="h-3.5 w-3.5" />} suffix="°F" value={room.backgroundTemp} onCommit={commit("backgroundTemp")} />
-        <CondInput id={`d-${room.id}`} label="Default Distance" icon={<Ruler className="h-3.5 w-3.5" />} suffix="ft" value={room.distance} onCommit={commit("distance")} />
         <CondInput id={`i-${room.id}`} label={`Image Date${room.imageDate ? "" : " (insp. date)"}`} icon={<CalendarDays className="h-3.5 w-3.5" />} type="date" value={room.imageDate || inspectionDate} onCommit={(v) => update(room.id, { imageDate: v === inspectionDate ? "" : v })} />
       </div>
     </Card>

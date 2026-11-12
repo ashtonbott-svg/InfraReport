@@ -2,6 +2,8 @@
 
 import { useState, type FormEvent } from "react";
 import { useOnOpen } from "@/lib/use-draft";
+import { useRouter } from "next/navigation";
+import { FileUp, ListPlus } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Field, Input, Select, Textarea } from "@/components/ui/field";
 import { Modal } from "@/components/ui/modal";
@@ -62,7 +64,9 @@ export function FacilityFormModal({ open, onClose, facility, customerId, onSaved
     ? { customerId: facility.customerId, name: facility.name, address: facility.address, city: facility.city, state: facility.state, postalCode: facility.postalCode, notes: facility.notes }
     : { ...emptyFacility, customerId: customerId ?? "" });
   const [v, setV] = useState(init);
-  useOnOpen(open, () => setV(init()));
+  const [created, setCreated] = useState<string | null>(null);
+  const router = useRouter();
+  useOnOpen(open, () => { setV(init()); setCreated(null); });
 
   const valid = v.name.trim() && v.customerId;
   const submit = (e: FormEvent) => {
@@ -75,10 +79,28 @@ export function FacilityFormModal({ open, onClose, facility, customerId, onSaved
     } else {
       const id = createFacility({ ...v, name: v.name.trim() });
       toast("Facility created");
-      onSaved?.(id);
+      setCreated(id); // next: choose empty list or import
+      return;
     }
     onClose();
   };
+
+  if (created) {
+    return (
+      <Modal open={open} onClose={() => { onSaved?.(created); onClose(); }} title="Equipment list" description={`How do you want to set up ${v.name.trim()}'s equipment?`}>
+        <div className="grid gap-3">
+          <button className="flex items-start gap-3 rounded-xl border-2 border-thermal-500 bg-thermal-50 p-4 text-left hover:bg-thermal-100" onClick={() => { onClose(); router.push(`/facilities/${created}/import`); }}>
+            <FileUp className="mt-0.5 h-6 w-6 shrink-0 text-thermal-700" />
+            <span><span className="block text-base font-semibold text-slate-900">Import Existing Equipment List</span><span className="text-sm text-slate-600">From a previous inspection report (PDF), Excel or CSV. You review every row before it is saved.</span></span>
+          </button>
+          <button className="flex items-start gap-3 rounded-xl border border-slate-200 p-4 text-left hover:bg-slate-50" onClick={() => { onSaved?.(created); onClose(); }}>
+            <ListPlus className="mt-0.5 h-6 w-6 shrink-0 text-slate-500" />
+            <span><span className="block text-base font-semibold text-slate-900">Start With Empty Equipment List</span><span className="text-sm text-slate-600">Add rooms and equipment as you inspect.</span></span>
+          </button>
+        </div>
+      </Modal>
+    );
+  }
 
   return (
     <Modal open={open} onClose={onClose} title={facility ? "Edit facility" : "New facility"}
