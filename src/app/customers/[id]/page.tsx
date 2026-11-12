@@ -9,9 +9,8 @@ import { Card, CardBody, CardHeader } from "@/components/ui/card";
 import { StatusBadge } from "@/components/ui/badge";
 import { EmptyState, PageHeader, Table, td, th } from "@/components/ui/misc";
 import { CustomerFormModal, FacilityFormModal } from "@/components/forms/entity-forms";
-import { toast } from "@/components/ui/toast";
+import { DeleteCustomerDialog } from "@/components/forms/delete-customer-dialog";
 import { useCustomers, useEquipment, useFacilities, useInspections } from "@/lib/store/hooks";
-import { useStore } from "@/lib/store/store";
 import { formatDate } from "@/lib/format";
 
 export default function CustomerDetailPage() {
@@ -21,17 +20,13 @@ export default function CustomerDetailPage() {
   const facilities = useFacilities().filter((f) => f.customerId === id);
   const inspections = useInspections().filter((i) => i.customerId === id).sort((a, b) => b.date.localeCompare(a.date));
   const equipment = useEquipment();
-  const deleteCustomer = useStore((s) => s.deleteCustomer);
   const [edit, setEdit] = useState(false);
   const [newFac, setNewFac] = useState(false);
+  const [confirmDelete, setConfirmDelete] = useState(false);
 
   if (!customer) return <EmptyState title="Customer not found" description="It may belong to another organization or have been removed." action={<Link href="/customers"><Button>Back to customers</Button></Link>} />;
 
-  const remove = () => {
-    if (!confirm(`Delete ${customer.name}? This cannot be undone.`)) return;
-    if (deleteCustomer(customer.id)) { toast("Customer deleted"); router.push("/customers"); }
-    else toast("Remove this customer’s facilities and inspections first", "error");
-  };
+
 
   return (
     <>
@@ -39,7 +34,7 @@ export default function CustomerDetailPage() {
         description={[customer.contactName, customer.contactPhone, customer.contactEmail].filter(Boolean).join(" · ")}
         actions={<>
           <Button onClick={() => setEdit(true)}><Pencil className="h-4 w-4" />Edit</Button>
-          <Button variant="danger" onClick={remove}><Trash2 className="h-4 w-4" />Delete</Button>
+          <Button variant="danger" onClick={() => setConfirmDelete(true)}><Trash2 className="h-4 w-4" />Delete Customer</Button>
           <Link href={`/inspections/new?customer=${customer.id}`}><Button variant="primary"><Plus className="h-4 w-4" />New Inspection</Button></Link>
         </>} />
       {customer.notes ? <Card className="mb-6"><CardBody className="text-sm text-slate-600">{customer.notes}</CardBody></Card> : null}
@@ -81,6 +76,7 @@ export default function CustomerDetailPage() {
         </Card>
       </div>
       <CustomerFormModal open={edit} onClose={() => setEdit(false)} customer={customer} />
+      <DeleteCustomerDialog customerId={customer.id} open={confirmDelete} onClose={() => setConfirmDelete(false)} onDeleted={() => router.push("/customers")} />
       <FacilityFormModal open={newFac} onClose={() => setNewFac(false)} customerId={customer.id} onSaved={(fid) => router.push(`/facilities/${fid}`)} />
     </>
   );

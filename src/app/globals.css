@@ -27,6 +27,12 @@ body {
   color: #0f172a;
 }
 
+/* Responsive guard: grid items default to min-width:auto, so one wide child
+   (a table, a long name) would stretch its whole column past the screen and
+   make phones zoom the page out. Let grid items shrink; wide content then
+   scrolls inside its own container (see Table). */
+.grid > * { min-width: 0; }
+
 /* Compact grid inputs for the equipment entry workspace */
 .grid-input {
   @apply h-8 w-full min-w-0 rounded border border-transparent bg-transparent px-2 text-sm text-slate-900 placeholder:text-slate-400 hover:border-slate-200 focus:border-thermal-500 focus:bg-white focus:outline-none focus:ring-2 focus:ring-thermal-500/20;

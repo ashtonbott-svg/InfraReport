@@ -49,7 +49,7 @@ export function Stat({ label, value, sub, icon }: { label: string; value: ReactN
 
 export function Table({ children, className }: { children: ReactNode; className?: string }) {
   return (
-    <div className={cn("overflow-x-auto", className)}>
+    <div className={cn("max-w-full overflow-x-auto overscroll-x-contain", className)}>
       <table className="w-full border-collapse text-sm">{children}</table>
     </div>
   );

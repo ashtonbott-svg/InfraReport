@@ -63,11 +63,11 @@ export default function DashboardPage() {
       <Card className="mt-6">
         <CardHeader title="Pipeline" description="Inspections by status" />
         <CardBody>
-          <div className="grid grid-cols-3 gap-2 sm:grid-cols-6">
+          <div className="grid grid-cols-2 gap-2 min-[400px]:grid-cols-3 md:grid-cols-6">
             {INSPECTION_STATUSES.map((s) => (
               <Link key={s} href={`/inspections?status=${encodeURIComponent(s)}`} className="rounded-md border border-slate-200 px-3 py-2.5 transition-colors hover:border-thermal-300 hover:bg-thermal-50/40">
                 <div className="text-xl font-semibold tabular-nums text-slate-900">{byStatus.get(s) ?? 0}</div>
-                <div className="mt-0.5 truncate text-xs text-slate-500">{s}</div>
+                <div className="mt-0.5 text-xs leading-tight text-slate-500">{s}</div>
               </Link>
             ))}
           </div>
@@ -82,7 +82,7 @@ export default function DashboardPage() {
         </CardBody>
       </Card>
 
-      <div className="mt-6 grid gap-6 xl:grid-cols-3">
+      <div className="mt-6 grid grid-cols-1 gap-6 xl:grid-cols-3">
         <Card className="xl:col-span-2">
           <CardHeader title="Active inspections" actions={<Link href="/inspections" className="text-xs font-medium text-thermal-700 hover:underline">View all</Link>} />
           {active.length === 0 ? (

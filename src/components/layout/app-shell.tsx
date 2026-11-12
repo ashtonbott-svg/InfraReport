@@ -241,7 +241,7 @@ export function AppShell({ children }: { children: ReactNode }) {
         </div>
       ) : null}
 
-      <div className="flex min-w-0 flex-1 flex-col pt-[calc(3.5rem+env(safe-area-inset-top))] lg:pl-60 lg:pt-0">
+      <div className="flex min-w-0 flex-1 flex-col overflow-x-clip pt-[calc(3.5rem+env(safe-area-inset-top))] lg:pl-60 lg:pt-0">
         <div className={cn("no-print items-center gap-2 border-b border-amber-200 bg-amber-50 px-4 py-1.5 text-xs text-amber-900 sm:px-8", fieldMode ? "hidden lg:flex" : "flex")}>
           <ShieldAlert className="h-3.5 w-3.5 shrink-0" />
           <span><strong>Prototype.</strong> Fictional demo data, saved only on this device (not a secure database). Do not enter real customer information.</span>

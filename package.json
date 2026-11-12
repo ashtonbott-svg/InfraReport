@@ -11,7 +11,8 @@
     "typecheck": "next typegen && tsc --noEmit",
     "copy-pdf-worker": "node -e \"require('fs').copyFileSync('node_modules/pdfjs-dist/build/pdf.worker.min.mjs','public/pdf.worker.min.mjs')\"",
     "prebuild": "npm run copy-pdf-worker",
-    "predev": "npm run copy-pdf-worker"
+    "predev": "npm run copy-pdf-worker",
+    "check:layout": "node scripts/check-mobile-layout.cjs"
   },
   "dependencies": {
     "clsx": "^2.1.1",

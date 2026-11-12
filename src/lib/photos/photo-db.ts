@@ -67,6 +67,19 @@ export function deletePhotoBlob(id: string): Promise<undefined> {
   return tx("readwrite", (s) => s.delete(id) as IDBRequest<undefined>);
 }
 
+/**
+ * Delete stored binaries that no photo record points to (left behind by an
+ * interrupted save or an older delete). Recent blobs are kept: a photo that is
+ * being saved right now has its binary written just before its record.
+ */
+export async function deleteOrphanPhotoBlobs(referencedIds: Set<string>, minAgeMs = 120_000): Promise<number> {
+  const all = await tx<StoredPhoto[]>("readonly", (s) => s.getAll() as IDBRequest<StoredPhoto[]>);
+  const cutoff = Date.now() - minAgeMs;
+  const orphans = all.filter((r) => !referencedIds.has(r.id) && Date.parse(r.savedAt) < cutoff);
+  for (const r of orphans) await deletePhotoBlob(r.id);
+  return orphans.length;
+}
+
 export async function listPhotoIds(): Promise<string[]> {
   return (await tx("readonly", (s) => s.getAllKeys())).map(String);
 }
