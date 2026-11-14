@@ -1,5 +1,6 @@
-import { LIMITED_ACCESS_OPENED, OPENED_VALUES, POSSIBLE_CAUSE_NONE } from "./constants";
+import { OPENED_VALUES, POSSIBLE_CAUSE_NONE } from "./constants";
 import { isNumericText, resolveEffective } from "./rules";
+import { imageHasNumber, resultStatus } from "./thermal";
 import type { ExportDataset } from "./csv";
 import { orderResults } from "./csv";
 import type { InspectionResult } from "./types";
@@ -53,24 +54,17 @@ export function validateInspection(
     if (!r.opened) push(r, "error", "Opened", `${name}: Opened value is not selected.`);
     else if (!OPENED_SET.has(r.opened)) push(r, "error", "Opened", `${name}: "${r.opened}" is not an approved Opened value.`);
 
-    if (!r.component.trim()) push(r, "warning", "Component", `${name}: Component is blank.`);
-
     for (const [label, value] of [
       ["Humidity", eff.humidity],
       ["Background Temp", eff.backgroundTemp],
       ["Ambient Temp", eff.ambientTemp],
-      ["Distance", eff.distance],
       ["Emissivity", eff.emissivity],
-      ["Max Temp", r.maxTemp],
     ] as const) {
-      if (value !== "" && !isNumericText(value)) {
-        push(r, "error", label, `${name}: ${label} "${value}" must be a number with no unit text.`);
-      }
+      if (value !== "" && !isNumericText(value)) push(r, "error", label, `${name}: ${label} "${value}" must be a number with no unit text.`);
     }
-    if (eff.humidity === "") push(r, "warning", "Humidity", `${name}: Humidity is blank (set it on the room or row).`);
+    if (eff.humidity === "") push(r, "warning", "Humidity", `${name}: Humidity is blank (set it on the room).`);
     if (eff.ambientTemp === "") push(r, "warning", "Ambient Temp", `${name}: Ambient Temp is blank.`);
     if (eff.backgroundTemp === "") push(r, "warning", "Background Temp", `${name}: Background Temp is blank.`);
-    if (eff.distance === "") push(r, "info", "Distance", `${name}: Distance is blank.`);
     if (isNumericText(eff.humidity) && (Number(eff.humidity) < 0 || Number(eff.humidity) > 100)) {
       push(r, "error", "Humidity", `${name}: Humidity ${eff.humidity} is outside 0 to 100.`);
     }
@@ -78,37 +72,35 @@ export function validateInspection(
       push(r, "error", "Emissivity", `${name}: Emissivity ${eff.emissivity} must be greater than 0 and at most 1.`);
     }
 
-    const limited = LIMITED_ACCESS_OPENED.includes(r.opened);
-    if (!r.irImageNumber && !r.visualImageNumber && !limited) {
-      push(r, "warning", "IR Image Number", `${name}: No image number recorded. Row is kept and exported.`);
-    }
-    if (r.visualFromSinglePhoto) {
-      push(r, "info", "Visual Image Number", `${name}: Visual # copied from the single recorded photo number. Verify.`);
-    }
-    if (r.maxTemp === "" && !limited && (r.irImageNumber || r.visualImageNumber)) {
-      push(r, "info", "Max Temp", `${name}: Max Temp blank. It will export blank (never estimated).`);
-    }
+    const status = resultStatus(r);
+    if (status === "todo") push(r, "warning", "IR Image Number", `${name}: Not inspected yet (To Do). The row is kept and exported.`);
+    if (status === "deferred") push(r, "warning", "Opened", `${name}: Deferred${r.exception?.note ? `: ${r.exception.note}` : ""}. Return to it before finishing.`);
 
-    const cause = r.possibleCause || POSSIBLE_CAUSE_NONE;
-    if (!causeSet.has(cause)) push(r, "warning", "Possible Cause", `${name}: "${cause}" is not in the controlled cause list.`);
-    if (cause !== POSSIBLE_CAUSE_NONE && !r.problemNotes.trim() && !r.reviewNotes.trim()) {
-      push(r, "warning", "Possible Cause", `${name}: Problem "${cause}" recorded without a description.`);
-    }
-    if (cause === POSSIBLE_CAUSE_NONE && r.problemNotes.trim()) {
-      push(r, "warning", "Possible Cause", `${name}: Problem notes entered but Possible Cause is NONE.`);
-    }
-
-    for (const n of new Set([r.irImageNumber, r.visualImageNumber].filter(Boolean))) {
-      const list = imageUse.get(n) ?? [];
-      list.push(r.id);
-      imageUse.set(n, list);
-    }
+    r.images.forEach((img, idx) => {
+      const label = r.images.length > 1 ? `${name} (image ${idx + 1}${img.component ? `, ${img.component}` : ""})` : name;
+      if (!img.component.trim()) push(r, "warning", "Component", `${label}: Component is blank.`);
+      for (const [l, v] of [["Distance", img.distance], ["Max Temp", img.maxTemp]] as const) {
+        if (v !== "" && !isNumericText(v)) push(r, "error", l, `${label}: ${l} "${v}" must be a number with no unit text.`);
+      }
+      if (status === "recorded" && !imageHasNumber(img)) push(r, "warning", "IR Image Number", `${label}: No image number on this image entry.`);
+      if (imageHasNumber(img) && img.distance === "") push(r, "info", "Distance", `${label}: Distance is blank.`);
+      const cause = img.possibleCause || POSSIBLE_CAUSE_NONE;
+      if (!causeSet.has(cause)) push(r, "warning", "Possible Cause", `${label}: "${cause}" is not in the controlled cause list.`);
+      if (cause !== POSSIBLE_CAUSE_NONE && img.maxTemp === "") push(r, "warning", "Max Temp", `${label}: Finding "${cause}" has no Max Temp. It exports blank (never estimated).`);
+      if (cause !== POSSIBLE_CAUSE_NONE && !img.notes.trim() && !r.reviewNotes.trim()) push(r, "info", "Possible Cause", `${label}: Finding recorded without a description.`);
+      if (img.visualOverridden && img.visualImageNumber !== img.irImageNumber) push(r, "info", "Visual Image Number", `${label}: Visual # ${img.visualImageNumber || "blank"} differs from IR # ${img.irImageNumber || "blank"}.`);
+      for (const n of new Set([img.irImageNumber].filter(Boolean))) {
+        const list = imageUse.get(n) ?? [];
+        list.push(r.id);
+        imageUse.set(n, list);
+      }
+    });
   }
 
   for (const [num, ids] of imageUse) {
     if (ids.length > 1) {
       const r = ordered.find((x) => x.id === ids[0]) ?? null;
-      push(r, "warning", "IR Image Number", `Image number ${num} is used on ${ids.length} equipment rows.`);
+      push(r, "warning", "IR Image Number", `IR image number ${num} is used ${ids.length} times.`);
     }
   }
 

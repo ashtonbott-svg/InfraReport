@@ -13,7 +13,7 @@ import { useStore } from "@/lib/store/store";
 import { countBySeverity } from "@/lib/domain/validation";
 import { locationLabel } from "@/lib/domain/csv";
 import { formatDateTime } from "@/lib/format";
-import { POSSIBLE_CAUSE_NONE } from "@/lib/domain/constants";
+import { resultHasFinding, roomProgress } from "@/lib/domain/thermal";
 import { ExteriorCapture, ExteriorChecklist, useFieldState } from "@/components/field/exterior-photos";
 import { useBeginFieldWork } from "@/lib/store/field-actions";
 import { visitDayCount } from "@/lib/domain/site-visit";
@@ -34,17 +34,19 @@ export default function InspectionOverviewPage() {
   const { dataset, issues } = bundle;
   const { inspection, results, rooms } = dataset;
   const counts = countBySeverity(issues);
-  const problems = results.filter((r) => r.possibleCause && r.possibleCause !== POSSIBLE_CAUSE_NONE).length;
+  const problems = results.filter(resultHasFinding).length;
+  const progress = roomProgress(results);
+  const thermalImages = results.reduce((n, r) => n + r.images.length, 0);
   const locs = dataset.locations as Map<string, import("@/lib/domain/types").Location>;
 
   return (
     <>
       <InspectionHeader inspection={inspection} errorCount={counts.error} />
       <div className="grid grid-cols-2 gap-3 lg:grid-cols-4">
-        <Stat label="Equipment rows" value={results.length} sub={`${rooms.length} rooms`} />
+        <Stat label="Equipment" value={results.length} sub={`${thermalImages} thermal images · ${rooms.length} rooms`} />
         <Stat label="Problems documented" value={problems} />
         <Stat label="Validation errors" value={<span className={counts.error ? "text-red-600" : ""}>{counts.error}</span>} sub={`${counts.warning} warnings`} />
-        <Stat label="Missing image #" value={results.filter((r) => !r.irImageNumber && !r.visualImageNumber).length} />
+        <Stat label="To do" value={progress.remaining.length} sub={`${progress.done} of ${progress.total} addressed`} />
       </div>
 
       <div className="mt-6 grid gap-6 xl:grid-cols-[1fr_380px]">

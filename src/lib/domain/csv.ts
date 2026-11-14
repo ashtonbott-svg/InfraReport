@@ -4,8 +4,10 @@ import type {
   InspectionResult,
   InspectionRoomConditions,
   Location,
+  ThermalImage,
 } from "./types";
 import { resolveEffective } from "./rules";
+import { newThermalImage } from "./thermal";
 import { POSSIBLE_CAUSE_NONE } from "./constants";
 
 /**
@@ -75,24 +77,26 @@ export function orderResults(ds: ExportDataset): InspectionResult[] {
   });
 }
 
-export function buildGeneratorRow(r: InspectionResult, ds: ExportDataset): GeneratorRow {
+/** One Generator row for one thermal image of one equipment result. */
+export function buildGeneratorRow(r: InspectionResult, ds: ExportDataset, image: ThermalImage = r.images[0]): GeneratorRow {
   const loc = lookup(ds.locations, r.locationId);
   const eq = lookup(ds.equipment, r.equipmentId);
   const room = ds.rooms.find((x) => x.locationId === r.locationId && x.inspectionId === r.inspectionId);
-  const eff = resolveEffective(r, room, ds.inspection);
+  const img = image ?? newThermalImage();
+  const eff = resolveEffective(r, room, ds.inspection, img);
   return [
     formatImageDate(eff.imageDate),
     locationLabel(loc),
     eff.humidity,
     eff.backgroundTemp,
     eq?.name ?? "",
-    r.component,
+    img.component,
     eff.distance,
-    r.possibleCause || POSSIBLE_CAUSE_NONE,
-    r.irImageNumber,
-    r.visualImageNumber,
+    img.possibleCause || POSSIBLE_CAUSE_NONE,
+    img.irImageNumber,
+    img.visualImageNumber,
     eff.emissivity,
-    r.maxTemp, // never invented: blank when not measured
+    img.maxTemp, // never invented: blank when not measured
     eff.ambientTemp,
     r.opened,
     r.confidence,
@@ -100,8 +104,15 @@ export function buildGeneratorRow(r: InspectionResult, ds: ExportDataset): Gener
   ].map((v) => (v ?? "").toString()) as GeneratorRow;
 }
 
+export interface GeneratorRowRef { result: InspectionResult; image: ThermalImage; imageIndex: number }
+
+/** Every thermal image of every result, in room / entry / image order. Results with no images still get one row. */
+export function flattenImages(ds: ExportDataset): GeneratorRowRef[] {
+  return orderResults(ds).flatMap((r) => (r.images.length ? r.images : [newThermalImage()]).map((image, imageIndex) => ({ result: r, image, imageIndex })));
+}
+
 export function buildGeneratorRows(ds: ExportDataset): GeneratorRow[] {
-  return orderResults(ds).map((r) => buildGeneratorRow(r, ds));
+  return flattenImages(ds).map(({ result, image }) => buildGeneratorRow(result, ds, image));
 }
 
 /** RFC 4180 field escaping. Empty values stay empty, so columns never shift. */

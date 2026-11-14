@@ -12,7 +12,8 @@ Electrical infrared inspection management and reporting. Prototype build.
 ```bash
 npm install
 npm run dev        # http://localhost:3000
-npm test           # 82 tests: CSV layout + golden export across upgrades, import (PDF/Excel/CSV), autocomplete, site visits, photos
+npm test           # 99 tests: Generator CSV/Excel layout, upgrades, import, thermal images, room completion, photos
+node scripts/check-field-workflow.cjs   # browser check of the field workflow (needs a running build)
 npm run build
 ```
 
@@ -43,6 +44,10 @@ redeploys automatically; other branches get preview deployments.
 | Import a previous equipment list (text PDF, .xlsx/.xlsm, CSV) with editable review | Functional, parsed on the device |
 | Scanned (image-only) PDF import | Not available: needs OCR, which is not connected. Detected and explained, nothing imported |
 | Equipment photos per item (camera, preview, retake, multiple) | Functional, stored on this device only |
+| Multiple thermal images per equipment (Top Half, Bottom Half...), one Generator row each | Functional |
+| Excel (.xlsx) export: Generator Import sheet (16 columns, typed cells), Equipment Summary, Column Map | Functional; Generator macros are not run |
+| Room completion: humidity required, every item recorded or documented as not scanned | Functional |
+| Before Opening photos with notes | Functional, stored on this device only |
 
 ### Storage limits (prototype)
 

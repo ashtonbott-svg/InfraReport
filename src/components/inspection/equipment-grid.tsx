@@ -2,14 +2,15 @@
 
 import { Fragment, useRef, useState, type KeyboardEvent } from "react";
 import { useDraft } from "@/lib/use-draft";
-import { ChevronDown, ChevronRight, Copy, CornerDownLeft, Trash2, Undo2, AlertTriangle, Camera } from "lucide-react";
+import { ChevronDown, ChevronRight, Copy, CornerDownLeft, Plus, Trash2, Undo2, X } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Field, Input, Select, Textarea } from "@/components/ui/field";
 import { cn } from "@/lib/cn";
 import {
   COMPONENT_SUGGESTIONS, DEFAULT_OPENED, EQUIPMENT_PRESETS, LIMITED_ACCESS_OPENED, OPENED_VALUES, OTHER_EQUIPMENT_TYPE, POSSIBLE_CAUSE_NONE,
 } from "@/lib/domain/constants";
-import { applySinglePhotoConvention, defaultComponentForType, incrementName, inferTypeFromName, resolveEffective } from "@/lib/domain/rules";
+import { defaultComponentForType, incrementName, inferTypeFromName, resolveEffective } from "@/lib/domain/rules";
+import { IMAGE_COMPONENTS, imageHasFinding, nextComponent, resultStatus } from "@/lib/domain/thermal";
 import { locationLabel } from "@/lib/domain/csv";
 import type { Equipment, Inspection, InspectionResult, InspectionRoomConditions, Location, ResultOverrides } from "@/lib/domain/types";
 import { useStore } from "@/lib/store/store";
@@ -78,8 +79,7 @@ export function QuickAddBar({ inspectionId, locationId, disabled }: { inspection
   const submit = () => {
     if (!locationId) { toast("Select or add a room first", "error"); return; }
     if (!name.trim()) { nameRef.current?.focus(); return; }
-    const photos = applySinglePhotoConvention(ir, vis);
-    addResult(inspectionId, locationId, { name: name.trim(), equipmentType: type, component: component.trim(), ...photos, opened, distance: dist });
+    addResult(inspectionId, locationId, { name: name.trim(), equipmentType: type, component: component.trim(), irImageNumber: ir, visualImageNumber: vis || ir, opened, distance: dist });
     // Ready for the next item: increment the name, keep type/component/opened, clear photos.
     setName(incrementName(name.trim()));
     setIr(""); setVis(""); setDist("");
@@ -102,19 +102,19 @@ export function QuickAddBar({ inspectionId, locationId, disabled }: { inspection
         <input aria-label="Component" list="component-suggestions" placeholder="Component" className="h-9 rounded-md border border-slate-700 bg-slate-800 px-3 text-sm placeholder:text-slate-500 focus:border-thermal-500 focus:outline-none md:col-span-2" value={component} onChange={(e) => { setComponent(e.target.value); setComponentTouched(true); }} onKeyDown={onKey} disabled={disabled} />
         <input aria-label="Distance" placeholder="Dist ft" inputMode="decimal" className="h-9 rounded-md border border-slate-700 bg-slate-800 px-3 text-sm tabular-nums placeholder:text-slate-500 focus:border-thermal-500 focus:outline-none md:col-span-1" value={dist} onChange={(e) => setDist(e.target.value)} onKeyDown={onKey} disabled={disabled} />
         <input aria-label="IR image number" placeholder="IR #" className="h-9 rounded-md border border-slate-700 bg-slate-800 px-3 text-sm tabular-nums placeholder:text-slate-500 focus:border-thermal-500 focus:outline-none md:col-span-1" value={ir} onChange={(e) => setIr(e.target.value)} onKeyDown={onKey} disabled={disabled} />
-        <input aria-label="Visual image number" placeholder="Visual #" className="h-9 rounded-md border border-slate-700 bg-slate-800 px-3 text-sm tabular-nums placeholder:text-slate-500 focus:border-thermal-500 focus:outline-none md:col-span-1" value={vis} onChange={(e) => setVis(e.target.value)} onKeyDown={onKey} disabled={disabled} />
+        <input aria-label="Visual image number" placeholder={ir ? `Vis ${ir}` : "Visual #"} className="h-9 rounded-md border border-slate-700 bg-slate-800 px-3 text-sm tabular-nums placeholder:text-slate-500 focus:border-thermal-500 focus:outline-none md:col-span-1" value={vis} onChange={(e) => setVis(e.target.value)} onKeyDown={onKey} disabled={disabled} />
         <select aria-label="Opened" className="col-span-2 h-9 rounded-md border border-slate-700 bg-slate-800 px-2 text-sm md:col-span-2" value={opened} onChange={(e) => setOpened(e.target.value)} disabled={disabled}>
           {OPENED_VALUES.map((o) => <option key={o}>{o}</option>)}
         </select>
         <Button variant="primary" className="col-span-2 justify-center md:col-span-1" onClick={submit} disabled={disabled}>Add</Button>
       </div>
-      <p className="mt-2 text-[11px] text-slate-400">One photo number only? Enter it in either field and it fills both IR and Visual, flagged for verification. Component resets to the preset when you change type, unless you typed your own.</p>
+      <p className="mt-2 text-[11px] text-slate-400">Visual # follows the IR # unless you type a different one. Add more thermal images (Top Half, Bottom Half...) from the + button on a row. Component resets to the preset when you change type, unless you typed your own.</p>
     </div>
   );
 }
 
 /* ------------------------------------------------------------------ */
-/* Grid                                                                */
+/* Grid: one table row per thermal image                               */
 /* ------------------------------------------------------------------ */
 export interface GridRow {
   result: InspectionResult;
@@ -125,92 +125,110 @@ export interface GridRow {
 
 const cell = "border-b border-slate-100 px-1 py-1 align-middle";
 const head = "sticky top-0 z-10 whitespace-nowrap border-b border-slate-200 bg-slate-50 px-2 py-2 text-left text-[11px] font-semibold uppercase tracking-wide text-slate-500";
+const STATUS_BADGE: Record<string, { label: string; cls: string }> = {
+  todo: { label: "To do", cls: "bg-slate-100 text-slate-500" },
+  recorded: { label: "Done", cls: "bg-emerald-50 text-emerald-700" },
+  "not-scanned": { label: "Not scanned", cls: "bg-amber-50 text-amber-800" },
+  deferred: { label: "Deferred", cls: "bg-amber-50 text-amber-800" },
+};
 
 export function EquipmentGrid({ rows, inspection, causes, showRoomHeaders, locations }: {
   rows: GridRow[]; inspection: Inspection; causes: string[]; showRoomHeaders: boolean; locations: Location[];
 }) {
-  const { updateResult, updateEquipment, duplicateResult, deleteResult } = useStore();
+  const { updateResult, updateEquipment, duplicateResult, deleteResult, updateThermalImage: updateImage, addThermalImage: addImage, removeThermalImage: removeImage } = useStore();
   const [expanded, setExpanded] = useState<string | null>(null);
+  // Flatten: each image is its own line; equipment-level cells only on the first.
+  const lines = rows.flatMap((row) => row.result.images.map((image, imageIndex) => ({ row, image, imageIndex })));
+  const headerAt = lines.map((l, i) => showRoomHeaders && l.imageIndex === 0 && (i === 0 || lines[i - 1].row.result.locationId !== l.row.result.locationId));
 
-  const headerAt = rows.map((row, i) => showRoomHeaders && (i === 0 || rows[i - 1].result.locationId !== row.result.locationId));
   return (
     <div className="overflow-x-auto rounded-lg border border-slate-200 bg-white shadow-xs">
-      <datalist id="component-suggestions">{COMPONENT_SUGGESTIONS.map((c) => <option key={c} value={c} />)}</datalist>
+      <datalist id="component-suggestions">{[...new Set([...IMAGE_COMPONENTS.map((c) => c.trim()), ...COMPONENT_SUGGESTIONS])].map((c) => <option key={c} value={c} />)}</datalist>
       <table className="w-full min-w-[1040px] border-collapse text-sm">
         <thead>
           <tr>
             <th className={cn(head, "w-8")} />
             <th className={cn(head, "sticky left-0 z-20 w-48 bg-slate-50")}>Equipment</th>
-            <th className={cn(head, "w-32")}>Component</th>
-            <th className={cn(head, "w-14")}>Dist</th>
+            <th className={cn(head, "w-36")}>Component</th>
             <th className={cn(head, "w-16")}>IR #</th>
+            <th className={cn(head, "w-14")}>Dist</th>
             <th className={cn(head, "w-16")}>Visual #</th>
             <th className={cn(head, "w-16")}>Max °F</th>
             <th className={cn(head, "w-52")}>Opened</th>
             <th className={cn(head, "w-44")}>Possible Cause</th>
-            <th className={cn(head, "w-20 text-right")}>Actions</th>
+            <th className={cn(head, "w-24 text-right")}>Actions</th>
           </tr>
         </thead>
         <tbody>
-          {rows.map((row, i) => {
-            const { result: r, equipment: eq, location, room } = row;
-            const eff = resolveEffective(r, room, inspection);
-            const problem = r.possibleCause && r.possibleCause !== POSSIBLE_CAUSE_NONE;
+          {lines.map(({ row, image: img, imageIndex }, i) => {
+            const { result: r, equipment: eq, location } = row;
+            const first = imageIndex === 0;
+            const multi = r.images.length > 1;
+            const problem = imageHasFinding(img);
+            const status = resultStatus(r);
             const limited = LIMITED_ACCESS_OPENED.includes(r.opened);
             const overrideCount = Object.values(r.overrides).filter((v) => v !== null).length;
-            const header = headerAt[i];
             const isOpen = expanded === r.id;
+            const last = imageIndex === r.images.length - 1;
             return (
-              <Fragment key={r.id}>
-                {header ? (
+              <Fragment key={img.id}>
+                {headerAt[i] ? (
                   <tr><td colSpan={10} className="border-b border-slate-200 bg-slate-100/70 px-3 py-1.5 text-xs font-semibold text-slate-600">{locationLabel(location)}</td></tr>
                 ) : null}
-                <tr className={cn("group", problem ? "bg-thermal-50/50" : "hover:bg-slate-50/70", isOpen && "bg-slate-50")} data-result-id={r.id}>
+                <tr className={cn("group", problem ? "bg-thermal-50/50" : "hover:bg-slate-50/70", isOpen && "bg-slate-50", !first && "text-slate-700")} data-result-id={first ? r.id : undefined} data-image-id={img.id}>
                   <td className={cn(cell, "pl-2 text-center", problem ? "border-l-2 border-l-thermal-500" : "border-l-2 border-l-transparent")}>
-                    <button onClick={() => setExpanded(isOpen ? null : r.id)} className="rounded p-0.5 text-slate-400 hover:bg-slate-200 hover:text-slate-700" aria-label={isOpen ? "Collapse details" : "Expand details"} aria-expanded={isOpen}>
-                      {isOpen ? <ChevronDown className="h-4 w-4" /> : <ChevronRight className="h-4 w-4" />}
-                    </button>
+                    {first ? (
+                      <button onClick={() => setExpanded(isOpen ? null : r.id)} className="rounded p-0.5 text-slate-400 hover:bg-slate-200 hover:text-slate-700" aria-label={isOpen ? "Collapse details" : "Expand details"} aria-expanded={isOpen}>
+                        {isOpen ? <ChevronDown className="h-4 w-4" /> : <ChevronRight className="h-4 w-4" />}
+                      </button>
+                    ) : null}
                   </td>
                   <td className={cn(cell, "sticky left-0 z-[5]", problem ? "bg-thermal-50" : "bg-white group-hover:bg-slate-50")}>
-                    <div className="flex items-center gap-1">
-                      <TextCell label="Equipment" row={i} col="name" value={eq?.name ?? ""} onCommit={(v) => eq && updateEquipment(eq.id, { name: v })} className="font-medium" />
-                      {overrideCount ? <span title={`${overrideCount} room value override(s)`} className="shrink-0 rounded bg-sky-100 px-1 text-[10px] font-semibold text-sky-700">OVR</span> : null}
-                      {r.visualFromSinglePhoto ? <span title="Visual # copied from single photo number" className="shrink-0 text-amber-500"><Camera className="h-3.5 w-3.5" /></span> : null}
-                    </div>
+                    {first ? (
+                      <div className="flex items-center gap-1">
+                        <TextCell label="Equipment" row={i} col="name" value={eq?.name ?? ""} onCommit={(v) => eq && updateEquipment(eq.id, { name: v })} className="font-medium" />
+                        <span className={cn("shrink-0 rounded px-1 text-[10px] font-semibold", STATUS_BADGE[status].cls)}>{STATUS_BADGE[status].label}</span>
+                        {overrideCount ? <span title={`${overrideCount} room value override(s)`} className="shrink-0 rounded bg-sky-100 px-1 text-[10px] font-semibold text-sky-700">OVR</span> : null}
+                      </div>
+                    ) : <div className="pl-4 text-xs text-slate-400">Image {imageIndex + 1}</div>}
                   </td>
-                  <td className={cell}><TextCell label="Component" row={i} col="component" list="component-suggestions" value={r.component} onCommit={(v) => updateResult(r.id, { component: v })} /></td>
+                  <td className={cell}><TextCell label="Component" row={i} col="component" list="component-suggestions" value={img.component} onCommit={(v) => updateImage(r.id, img.id, { component: v })} /></td>
+                  <td className={cell}><TextCell label="IR image number" row={i} col="ir" numeric value={img.irImageNumber} onCommit={(v) => updateImage(r.id, img.id, { irImageNumber: v })} /></td>
+                  <td className={cell}><TextCell label="Distance" row={i} col="distance" numeric value={img.distance} onCommit={(v) => updateImage(r.id, img.id, { distance: v })} /></td>
                   <td className={cell}>
-                    <TextCell label="Distance" row={i} col="distance" numeric value={r.distance ?? ""} onCommit={(v) => updateResult(r.id, { distance: v })} />
+                    <TextCell label="Visual image number" row={i} col="vis" numeric value={img.visualOverridden ? img.visualImageNumber : ""} placeholder={img.visualOverridden ? "" : img.irImageNumber} inherited={!img.visualOverridden}
+                      onCommit={(v) => updateImage(r.id, img.id, v.trim() === "" ? { visualOverridden: false } : { visualOverridden: true, visualImageNumber: v })} />
                   </td>
-                  <td className={cell}><TextCell label="IR image number" row={i} col="ir" numeric value={r.irImageNumber} onCommit={(v) => updateResult(r.id, { irImageNumber: v.trim(), visualFromSinglePhoto: false })} /></td>
-                  <td className={cell}><TextCell label="Visual image number" row={i} col="vis" numeric value={r.visualImageNumber} onCommit={(v) => updateResult(r.id, { visualImageNumber: v.trim(), visualFromSinglePhoto: false })} className={r.visualFromSinglePhoto ? "text-amber-700" : ""} /></td>
-                  <td className={cell}><TextCell label="Max temp" row={i} col="max" numeric value={r.maxTemp} placeholder={limited ? "n/a" : ""} onCommit={(v) => updateResult(r.id, { maxTemp: v })} /></td>
+                  <td className={cell}><TextCell label="Max temp" row={i} col="max" numeric value={img.maxTemp} placeholder={problem ? "" : ""} onCommit={(v) => updateImage(r.id, img.id, { maxTemp: v })} /></td>
                   <td className={cell}>
-                    <select className={cn("grid-input", limited && "text-amber-800")} value={r.opened} aria-label="Opened" data-grid-row={i} data-grid-col="opened"
-                      onChange={(e) => updateResult(r.id, { opened: e.target.value })} onKeyDown={(e) => gridKeyDown(e, i, "opened")}>
-                      {!OPENED_VALUES.includes(r.opened as never) ? <option value={r.opened}>{r.opened || "Select…"}</option> : null}
-                      {OPENED_VALUES.map((o) => <option key={o}>{o}</option>)}
-                    </select>
+                    {first ? (
+                      <select className={cn("grid-input", limited && "text-amber-800")} value={r.opened} aria-label="Opened" data-grid-row={i} data-grid-col="opened"
+                        onChange={(e) => updateResult(r.id, { opened: e.target.value })} onKeyDown={(e) => gridKeyDown(e, i, "opened")}>
+                        {!OPENED_VALUES.includes(r.opened as never) ? <option value={r.opened}>{r.opened || "Select…"}</option> : null}
+                        {OPENED_VALUES.map((o) => <option key={o}>{o}</option>)}
+                      </select>
+                    ) : null}
                   </td>
                   <td className={cell}>
-                    <select className={cn("grid-input", problem && "font-medium text-thermal-800")} value={r.possibleCause || POSSIBLE_CAUSE_NONE} aria-label="Possible cause" data-grid-row={i} data-grid-col="cause"
-                      onChange={(e) => { updateResult(r.id, { possibleCause: e.target.value }); if (e.target.value !== POSSIBLE_CAUSE_NONE) setExpanded(r.id); }}
-                      onKeyDown={(e) => gridKeyDown(e, i, "cause")}>
-                      {!causes.includes(r.possibleCause) && r.possibleCause ? <option>{r.possibleCause}</option> : null}
+                    <select className={cn("grid-input", problem && "font-medium text-thermal-800")} value={img.possibleCause || POSSIBLE_CAUSE_NONE} aria-label="Possible cause" data-grid-row={i} data-grid-col="cause"
+                      onChange={(e) => updateImage(r.id, img.id, { possibleCause: e.target.value })} onKeyDown={(e) => gridKeyDown(e, i, "cause")}>
+                      {!causes.includes(img.possibleCause) && img.possibleCause ? <option>{img.possibleCause}</option> : null}
                       {causes.map((c) => <option key={c}>{c}</option>)}
                     </select>
                   </td>
                   <td className={cn(cell, "pr-2 text-right")}>
                     <div className="flex justify-end gap-0.5">
-                      <Button size="icon" variant="ghost" title="Duplicate (next number)" aria-label="Duplicate row" onClick={() => { duplicateResult(r.id); toast("Row duplicated"); }}><Copy className="h-3.5 w-3.5" /></Button>
-                      <Button size="icon" variant="ghost" title="Remove from this inspection" aria-label="Delete row" onClick={() => { if (confirm(`Remove ${eq?.name || "this row"} from this inspection?`)) { deleteResult(r.id); toast("Row removed"); } }}><Trash2 className="h-3.5 w-3.5" /></Button>
+                      {last ? <Button size="icon" variant="ghost" title="Add another thermal image" aria-label="Add another image" onClick={() => addImage(r.id, { component: nextComponent(r.images.map((x) => x.component)) })}><Plus className="h-3.5 w-3.5" /></Button> : null}
+                      {multi ? <Button size="icon" variant="ghost" title="Remove this image" aria-label="Remove image" onClick={() => { if (confirm(`Remove image ${imageIndex + 1} (${img.component || "no component"}) from ${eq?.name}?`)) removeImage(r.id, img.id); }}><X className="h-3.5 w-3.5" /></Button> : null}
+                      {first ? <Button size="icon" variant="ghost" title="Duplicate (next number)" aria-label="Duplicate row" onClick={() => { duplicateResult(r.id); toast("Equipment duplicated"); }}><Copy className="h-3.5 w-3.5" /></Button> : null}
+                      {first ? <Button size="icon" variant="ghost" title="Remove from this inspection" aria-label="Delete row" onClick={() => { if (confirm(`Remove ${eq?.name || "this row"} from this inspection?`)) { deleteResult(r.id); toast("Row removed"); } }}><Trash2 className="h-3.5 w-3.5" /></Button> : null}
                     </div>
                   </td>
                 </tr>
-                {isOpen ? (
+                {isOpen && last ? (
                   <tr className="bg-slate-50">
                     <td colSpan={10} className="border-b border-slate-200 px-4 py-4">
-                      <RowDetails row={row} inspection={inspection} eff={eff} locations={locations} />
+                      <RowDetails row={row} inspection={inspection} locations={locations} />
                     </td>
                   </tr>
                 ) : null}
@@ -239,14 +257,14 @@ function OverrideField({ label, k, row, inherited, type = "text" }: { label: str
   );
 }
 
-function RowDetails({ row, inspection, eff, locations }: { row: GridRow; inspection: Inspection; eff: ReturnType<typeof resolveEffective>; locations: Location[] }) {
-  const { updateResult, updateEquipment } = useStore();
+function RowDetails({ row, inspection, locations }: { row: GridRow; inspection: Inspection; locations: Location[] }) {
+  const { updateResult, updateEquipment, updateThermalImage: updateImage, setException } = useStore();
   const r = row.result;
   const room = row.room;
-  const [notes, setNotes] = useDraft(r.problemNotes);
   const [review, setReview] = useDraft(r.reviewNotes);
   const [conf, setConf] = useDraft(r.confidence);
   const facilityLocations = locations.filter((l) => l.facilityId === inspection.facilityId);
+  const eff = resolveEffective(r, room, inspection);
 
   return (
     <div className="grid gap-5 lg:grid-cols-[1fr_1fr]">
@@ -279,19 +297,15 @@ function RowDetails({ row, inspection, eff, locations }: { row: GridRow; inspect
           </Field>
         </div>
         <p className="mt-3 text-xs text-slate-500">
-          Exports as: {eff.imageDate} · H {eff.humidity || "blank"} · Bg {eff.backgroundTemp || "blank"} · Amb {eff.ambientTemp || "blank"} · Dist {eff.distance || "blank"} · ε {eff.emissivity}
+          Exports as: {eff.imageDate} · H {eff.humidity || "blank"} · Bg {eff.backgroundTemp || "blank"} · Amb {eff.ambientTemp || "blank"} · ε {eff.emissivity}
         </p>
       </div>
       <div className="space-y-3">
-        {r.visualFromSinglePhoto ? (
-          <div className="flex items-start justify-between gap-3 rounded-md border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-900">
-            <span className="flex gap-2"><AlertTriangle className="mt-0.5 h-3.5 w-3.5 shrink-0" />Only one photo number was recorded, so it was copied to both IR and Visual. Confirm or correct it.</span>
-            <Button size="sm" onClick={() => updateResult(r.id, { visualFromSinglePhoto: false })}>Mark verified</Button>
-          </div>
-        ) : null}
-        <Field label="Problem description" htmlFor={`pn-${r.id}`} hint="Required when Possible Cause is not NONE.">
-          <Textarea id={`pn-${r.id}`} value={notes} onChange={(e) => setNotes(e.target.value)} onBlur={() => notes !== r.problemNotes && updateResult(r.id, { problemNotes: notes })} placeholder="e.g. Circuit 11 lug 40°F above similar connections" />
-        </Field>
+        {r.images.map((img, idx) => (
+          <Field key={img.id} label={`Notes${r.images.length > 1 ? `, image ${idx + 1} (${img.component || "no component"})` : ""}`} htmlFor={`pn-${img.id}`}>
+            <NoteArea id={`pn-${img.id}`} value={img.notes} onCommit={(v) => updateImage(r.id, img.id, { notes: v })} />
+          </Field>
+        ))}
         <div className="grid gap-3 sm:grid-cols-[1fr_140px]">
           <Field label="Review Notes (exported)" htmlFor={`rn-${r.id}`}>
             <Input id={`rn-${r.id}`} value={review} onChange={(e) => setReview(e.target.value)} onBlur={() => review !== r.reviewNotes && updateResult(r.id, { reviewNotes: review })} />
@@ -300,8 +314,23 @@ function RowDetails({ row, inspection, eff, locations }: { row: GridRow; inspect
             <Input id={`cf-${r.id}`} value={conf} onChange={(e) => setConf(e.target.value)} onBlur={() => conf !== r.confidence && updateResult(r.id, { confidence: conf })} />
           </Field>
         </div>
+        <div className="flex flex-wrap items-center gap-2 text-xs">
+          <span className="font-medium text-slate-600">Not scanned?</span>
+          {r.exception ? (
+            <><span className="rounded bg-amber-50 px-2 py-1 text-amber-900">{r.exception.kind === "deferred" ? "Deferred" : "Not scanned"}{r.exception.note ? `: ${r.exception.note}` : ""}</span>
+              <Button size="sm" variant="ghost" onClick={() => setException(r.id, null)}>Clear</Button></>
+          ) : (
+            <><Button size="sm" onClick={() => setException(r.id, { kind: "not-scanned", note: "" })}>Mark not scanned</Button>
+              <Button size="sm" onClick={() => setException(r.id, { kind: "deferred", note: "" })}>Mark deferred</Button></>
+          )}
+        </div>
         <p className="text-[11px] text-slate-400">Source: {r.source === "carried-forward" ? "carried forward from facility inventory" : r.source === "field-notes" ? "field notes extraction" : "manual entry"}</p>
       </div>
     </div>
   );
+}
+
+function NoteArea({ id, value, onCommit }: { id: string; value: string; onCommit: (v: string) => void }) {
+  const [v, setV] = useDraft(value);
+  return <Textarea id={id} value={v} onChange={(e) => setV(e.target.value)} onBlur={() => v !== value && onCommit(v)} />;
 }

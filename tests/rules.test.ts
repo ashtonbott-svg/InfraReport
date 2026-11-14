@@ -37,8 +37,9 @@ describe("room inheritance", () => {
   const room = { humidity: "45", ambientTemp: "74", backgroundTemp: "73", distance: "4", imageDate: "" };
   const insp = { date: "2026-03-10", defaultEmissivity: "0.95" };
   it("inherits all room values by default", () => {
-    const e = resolveEffective({ overrides: { ...EMPTY_OVERRIDES } }, room, insp);
-    expect([e.humidity, e.ambientTemp, e.backgroundTemp, e.distance, e.imageDate, e.emissivity]).toEqual(["45", "74", "73", "4", "2026-03-10", "0.95"]);
+    const e = resolveEffective({ overrides: { ...EMPTY_OVERRIDES } }, room, insp, { distance: "6" });
+    // Distance comes from the thermal image, never from the room
+    expect([e.humidity, e.ambientTemp, e.backgroundTemp, e.distance, e.imageDate, e.emissivity]).toEqual(["45", "74", "73", "6", "2026-03-10", "0.95"]);
     expect(e.overridden).toEqual({});
   });
   it("uses individual overrides", () => {
@@ -48,8 +49,8 @@ describe("room inheritance", () => {
     expect(e.humidity).toBe("45");
     expect(e.overridden).toEqual({ ambientTemp: true, emissivity: true });
   });
-  it("an explicit blank override is respected", () => {
-    expect(resolveEffective({ overrides: { ...EMPTY_OVERRIDES, distance: "" } }, room, insp).distance).toBe("");
+  it("a blank image distance stays blank (a legacy room distance is not used)", () => {
+    expect(resolveEffective({ overrides: { ...EMPTY_OVERRIDES } }, room, insp, { distance: "" }).distance).toBe("");
   });
 });
 

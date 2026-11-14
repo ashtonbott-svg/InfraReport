@@ -157,6 +157,10 @@ export interface InspectionRoomConditions {
   /** Legacy (schema v2). Distance is now recorded per equipment; always "". */
   distance: NumericText;
   imageDate: ISODate | ""; // blank = inspection date
+  /** Name of the room the conditions were copied from, until the inspector confirms or edits them here. */
+  conditionsCopiedFrom: string | null;
+  /** Set when the inspector finishes the room (humidity present, all equipment addressed). */
+  completedAt: ISODateTime | null;
 }
 
 /**
@@ -182,17 +186,16 @@ export interface InspectionResult {
   inspectionId: ID;
   equipmentId: ID;
   locationId: ID; // where it was inspected this time
-  component: string;
-  /** Distance to this equipment in feet, recorded per item. */
-  distance: NumericText;
-  irImageNumber: string;
-  visualImageNumber: string;
-  /** True when the Visual number was copied from a single recorded photo number. */
-  visualFromSinglePhoto: boolean;
-  maxTemp: NumericText;
+  /**
+   * Thermal image / measurement entries for this equipment during this
+   * inspection (e.g. Top Half, Bottom Half). Always at least one. Each entry
+   * becomes one Generator row; the equipment still counts once.
+   */
+  images: ThermalImage[];
+  /** Access status for the whole item (approved Opened value). */
   opened: string;
-  possibleCause: string;
-  problemNotes: string;
+  /** Item documented as not scanned or deferred (no fake image numbers needed). */
+  exception: ResultException | null;
   confidence: string;
   reviewNotes: string;
   overrides: ResultOverrides;
@@ -200,6 +203,30 @@ export interface InspectionResult {
   sortOrder: number;
   createdAt: ISODateTime;
   updatedAt: ISODateTime;
+}
+
+export interface ThermalImage {
+  id: ID;
+  /** Component or area photographed: Full Panel, Top Half, Section 2, Circuit 11... */
+  component: string;
+  irImageNumber: string;
+  /** Follows irImageNumber unless visualOverridden. Always stored as exported. */
+  visualImageNumber: string;
+  visualOverridden: boolean;
+  /** Distance in feet for this image. */
+  distance: NumericText;
+  possibleCause: string;
+  /** Measured problem temperature; only when a finding is documented. */
+  maxTemp: NumericText;
+  notes: string;
+}
+
+export type ResultExceptionKind = "not-scanned" | "deferred";
+
+export interface ResultException {
+  kind: ResultExceptionKind;
+  note: string;
+  at: ISODateTime;
 }
 
 export type ImageKind = "thermal" | "visual" | "unknown";
@@ -216,7 +243,7 @@ export interface ImageAsset {
   verified: boolean;
 }
 
-export type PhotoKind = "exterior" | "equipment";
+export type PhotoKind = "exterior" | "equipment" | "before-opening";
 
 /**
  * A photo captured or uploaded from the inspector's device. The binary lives in
@@ -237,6 +264,8 @@ export interface Photo {
   sizeBytes: number;
   capturedAt: ISODateTime;
   savedAt: ISODateTime;
+  /** Optional note (used for before-opening condition photos). */
+  note?: string;
 }
 
 export type DocumentKind = "field-notes" | "report" | "workbook" | "other";

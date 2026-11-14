@@ -40,14 +40,17 @@ import type {
   OrganizationSettings,
   Photo,
   ResultOverrides,
+  ResultExceptionKind,
+  ThermalImage,
   ReviewEvent,
   User,
 } from "../domain/types";
 import { DEFAULT_ORG_ID as DEMO_ORG_ID, ASHTON_ID, LEGACY_DEMO_IDS, THERMOGRAPHERS, buildSeed } from "./seed";
 import { checkExit, newSiteVisit, requiredBuildings, type ExitCheck } from "../domain/site-visit";
+import { checkRoom, newThermalImage, patchThermalImage } from "../domain/thermal";
 import { trackedLocalStorage } from "./save-status";
 
-export const SCHEMA_VERSION = 3;
+export const SCHEMA_VERSION = 4;
 
 export interface DataState {
   schemaVersion: number;
@@ -76,7 +79,9 @@ export interface NewEquipmentRow {
   equipmentType: string;
   component?: string;
   irImageNumber?: string;
+  /** Only when it differs from the IR number (otherwise it follows IR). */
   visualImageNumber?: string;
+  /** @deprecated ignored; Visual follows IR unless visualImageNumber differs. */
   visualFromSinglePhoto?: boolean;
   maxTemp?: string;
   opened?: string;
@@ -129,6 +134,16 @@ export interface Actions {
   updateResult(id: ID, patch: Partial<InspectionResult>): void;
   setOverride(id: ID, key: keyof ResultOverrides, value: string | null): void;
   duplicateResult(id: ID): ID | null;
+  /** Add a thermal image entry to a result; returns the new image id. */
+  addThermalImage(resultId: ID, partial?: Partial<ThermalImage>): ID;
+  updateThermalImage(resultId: ID, imageId: ID, patch: Partial<ThermalImage>): void;
+  /** Removes an image entry; the last remaining entry is cleared instead of removed. */
+  removeThermalImage(resultId: ID, imageId: ID): void;
+  setException(resultId: ID, exception: { kind: ResultExceptionKind; note: string } | null): void;
+  confirmRoomConditions(roomId: ID): void;
+  /** Marks a room finished. Returns false (no change) when the room check fails. */
+  finishRoom(roomId: ID): boolean;
+  reopenRoom(roomId: ID): void;
   deleteResult(id: ID): void;
   addDocument(doc: Omit<DocumentAsset, "id" | "organizationId" | "uploadedAt">): ID;
   removeDocument(id: ID): void;
@@ -266,14 +281,13 @@ export const useStore = create<Store>()(
           if (carryForward) {
             const locs = s.locations.filter((l) => l.facilityId === facilityId).sort((a, b) => a.sortOrder - b.sortOrder);
             for (const l of locs) {
-              rooms.push({ id: uid("rc"), organizationId: org(), inspectionId: id, locationId: l.id, humidity: "", ambientTemp: "", backgroundTemp: "", distance: "", imageDate: "" });
+              rooms.push({ id: uid("rc"), organizationId: org(), inspectionId: id, locationId: l.id, humidity: "", ambientTemp: "", backgroundTemp: "", distance: "", imageDate: "", conditionsCopiedFrom: null, completedAt: null });
             }
             const eqs = s.equipment.filter((e) => e.facilityId === facilityId && e.active).sort((a, b) => a.sortOrder - b.sortOrder);
             eqs.forEach((e, i) => {
               results.push({
                 id: uid("res"), organizationId: org(), inspectionId: id, equipmentId: e.id, locationId: e.locationId,
-                component: e.defaultComponent, distance: "", irImageNumber: "", visualImageNumber: "", visualFromSinglePhoto: false,
-                maxTemp: "", opened: DEFAULT_OPENED, possibleCause: POSSIBLE_CAUSE_NONE, problemNotes: "",
+                images: [newThermalImage({ component: e.defaultComponent })], opened: DEFAULT_OPENED, exception: null,
                 confidence: "", reviewNotes: "", overrides: { ...EMPTY_OVERRIDES }, source: "carried-forward",
                 sortOrder: i + 1, createdAt: now(), updatedAt: now(),
               });
@@ -387,7 +401,7 @@ export const useStore = create<Store>()(
           const existing = get().rooms.find((r) => r.inspectionId === inspectionId && r.locationId === locationId);
           if (existing) return existing.id;
           const id = uid("rc");
-          set((s) => ({ rooms: [...s.rooms, { id, organizationId: org(), inspectionId, locationId, humidity: "", ambientTemp: "", backgroundTemp: "", distance: "", imageDate: "" }] }));
+          set((s) => ({ rooms: [...s.rooms, { id, organizationId: org(), inspectionId, locationId, humidity: "", ambientTemp: "", backgroundTemp: "", distance: "", imageDate: "", conditionsCopiedFrom: null, completedAt: null }] }));
           return id;
         },
         createRoomForInspection(inspectionId, room, conditions) {
@@ -400,7 +414,34 @@ export const useStore = create<Store>()(
           return locationId;
         },
         updateRoomConditions(id, patch) {
-          set((s) => ({ rooms: s.rooms.map((r) => (r.id === id ? { ...r, ...normalizePatch(patch), id } : r)) }));
+          // Editing a measured value here means the conditions are no longer "copied".
+          const touches = ["humidity", "ambientTemp", "backgroundTemp"].some((k) => k in patch);
+          set((s) => ({
+            rooms: s.rooms.map((r) => (r.id === id ? {
+              ...r, ...normalizePatch(patch), id,
+              conditionsCopiedFrom: "conditionsCopiedFrom" in patch ? patch.conditionsCopiedFrom ?? null : touches ? null : r.conditionsCopiedFrom ?? null,
+            } : r)),
+          }));
+        },
+        confirmRoomConditions(roomId) {
+          set((s) => ({ rooms: s.rooms.map((r) => (r.id === roomId ? { ...r, conditionsCopiedFrom: null } : r)) }));
+          const r = get().rooms.find((x) => x.id === roomId);
+          if (r) get().logEvent(r.inspectionId, "Room conditions confirmed", "Copied conditions confirmed as measured in this room");
+        },
+        finishRoom(roomId) {
+          const s = get();
+          const room = s.rooms.find((r) => r.id === roomId);
+          if (!room) return false;
+          const results = s.results.filter((r) => r.inspectionId === room.inspectionId && r.locationId === room.locationId);
+          if (!checkRoom(room, results).canFinish) return false;
+          set((st) => ({ rooms: st.rooms.map((r) => (r.id === roomId ? { ...r, completedAt: now() } : r)) }));
+          const loc = s.locations.find((l) => l.id === room.locationId);
+          get().logEvent(room.inspectionId, "Room finished", `${loc?.name ?? "Room"}: ${results.length} equipment items addressed`);
+          touch(room.inspectionId);
+          return true;
+        },
+        reopenRoom(roomId) {
+          set((s) => ({ rooms: s.rooms.map((r) => (r.id === roomId ? { ...r, completedAt: null } : r)) }));
         },
         removeRoomFromInspection(inspectionId, locationId) {
           if (get().results.some((r) => r.inspectionId === inspectionId && r.locationId === locationId)) return false;
@@ -417,13 +458,18 @@ export const useStore = create<Store>()(
             facilityId: insp.facilityId, locationId, name: row.name.trim(), equipmentType: type, defaultComponent: component,
           });
           const id = uid("res");
+          const ir = (row.irImageNumber ?? "").trim();
+          const vis = (row.visualImageNumber ?? "").trim();
           const result: InspectionResult = {
-            id, organizationId: org(), inspectionId, equipmentId, locationId, component,
-            distance: normalizeNumericInput(row.distance ?? ""),
-            irImageNumber: (row.irImageNumber ?? "").trim(), visualImageNumber: (row.visualImageNumber ?? "").trim(),
-            visualFromSinglePhoto: !!row.visualFromSinglePhoto,
-            maxTemp: normalizeNumericInput(row.maxTemp ?? ""), opened: row.opened || DEFAULT_OPENED,
-            possibleCause: row.possibleCause || POSSIBLE_CAUSE_NONE, problemNotes: row.problemNotes ?? "",
+            id, organizationId: org(), inspectionId, equipmentId, locationId,
+            images: [newThermalImage({
+              component, irImageNumber: ir, distance: row.distance ?? "",
+              visualOverridden: vis !== "" && vis !== ir, visualImageNumber: vis,
+              possibleCause: row.possibleCause || POSSIBLE_CAUSE_NONE,
+              maxTemp: row.possibleCause && row.possibleCause !== POSSIBLE_CAUSE_NONE ? row.maxTemp ?? "" : row.maxTemp ?? "",
+              notes: row.problemNotes ?? "",
+            })],
+            opened: row.opened || DEFAULT_OPENED, exception: null,
             confidence: "", reviewNotes: "",
             overrides: { ...EMPTY_OVERRIDES },
             source: "manual", sortOrder: nextResultOrder(inspectionId), createdAt: now(), updatedAt: now(),
@@ -440,9 +486,9 @@ export const useStore = create<Store>()(
           const id = uid("res");
           set((s) => ({
             results: [...s.results, {
-              id, organizationId: org(), inspectionId, equipmentId, locationId: e.locationId, component: e.defaultComponent, distance: "",
-              irImageNumber: "", visualImageNumber: "", visualFromSinglePhoto: false, maxTemp: "", opened: DEFAULT_OPENED,
-              possibleCause: POSSIBLE_CAUSE_NONE, problemNotes: "", confidence: "", reviewNotes: "",
+              id, organizationId: org(), inspectionId, equipmentId, locationId: e.locationId,
+              images: [newThermalImage({ component: e.defaultComponent })], opened: DEFAULT_OPENED, exception: null,
+              confidence: "", reviewNotes: "",
               overrides: { ...EMPTY_OVERRIDES }, source: "carried-forward", sortOrder: nextResultOrder(inspectionId),
               createdAt: now(), updatedAt: now(),
             }],
@@ -468,13 +514,16 @@ export const useStore = create<Store>()(
           const r = s.results.find((x) => x.id === id);
           const e = r && s.equipment.find((x) => x.id === r.equipmentId);
           if (!r || !e) return null;
-          // Copies type, component, opened, and overrides. Image numbers, temps and
-          // problems are NOT copied, because they belong to the original item.
+          // Copies type, image components, opened and overrides. Image numbers,
+          // distances, temps and findings are NOT copied: they belong to the original.
           const newId = get().addResult(r.inspectionId, r.locationId, {
-            name: incrementName(e.name), equipmentType: e.equipmentType, component: r.component, opened: r.opened,
+            name: incrementName(e.name), equipmentType: e.equipmentType, component: r.images[0]?.component ?? e.defaultComponent, opened: r.opened,
           });
           set((st) => ({
-            results: st.results.map((x) => (x.id === newId ? { ...x, overrides: { ...r.overrides } } : x)),
+            results: st.results.map((x) => (x.id === newId ? {
+              ...x, overrides: { ...r.overrides },
+              images: r.images.map((img, i) => (i === 0 ? x.images[0] : newThermalImage({ component: img.component }))),
+            } : x)),
           }));
           // place directly after the source row
           const list = get().results.filter((x) => x.inspectionId === r.inspectionId).sort((a, b) => a.sortOrder - b.sortOrder);
@@ -485,6 +534,47 @@ export const useStore = create<Store>()(
           const order = new Map(moved.map((x, i) => [x.id, i + 1]));
           set((st) => ({ results: st.results.map((x) => (order.has(x.id) ? { ...x, sortOrder: order.get(x.id)! } : x)) }));
           return newId;
+        },
+        addThermalImage(resultId, partial) {
+          const r = get().results.find((x) => x.id === resultId);
+          if (!r) return "";
+          const img = newThermalImage(partial ?? {});
+          set((s) => ({ results: s.results.map((x) => (x.id === resultId ? { ...x, images: [...x.images, img], updatedAt: now() } : x)) }));
+          touch(r.inspectionId);
+          return img.id;
+        },
+        updateThermalImage(resultId, imageId, patch) {
+          const r = get().results.find((x) => x.id === resultId);
+          if (!r) return;
+          set((s) => ({
+            results: s.results.map((x) => (x.id === resultId ? {
+              ...x, updatedAt: now(),
+              images: x.images.map((img) => (img.id === imageId ? patchThermalImage(img, patch) : img)),
+              // Recording a number on an item clears a "deferred" mark: it is now inspected.
+              exception: patch.irImageNumber && x.exception?.kind === "deferred" ? null : x.exception,
+            } : x)),
+          }));
+          touch(r.inspectionId);
+        },
+        removeThermalImage(resultId, imageId) {
+          const r = get().results.find((x) => x.id === resultId);
+          if (!r) return;
+          set((s) => ({
+            results: s.results.map((x) => {
+              if (x.id !== resultId) return x;
+              const images = x.images.length > 1
+                ? x.images.filter((i) => i.id !== imageId)
+                : x.images.map((i) => (i.id === imageId ? newThermalImage({ id: i.id, component: i.component }) : i));
+              return { ...x, images, updatedAt: now() };
+            }),
+          }));
+          touch(r.inspectionId);
+        },
+        setException(resultId, exception) {
+          const r = get().results.find((x) => x.id === resultId);
+          if (!r) return;
+          set((s) => ({ results: s.results.map((x) => (x.id === resultId ? { ...x, exception: exception ? { ...exception, at: now() } : null, updatedAt: now() } : x)) }));
+          touch(r.inspectionId);
         },
         deleteResult(id) {
           const r = get().results.find((x) => x.id === id);
@@ -627,12 +717,37 @@ export function migrateState(state: Partial<DataState>, version: number): Partia
     const rooms = out.rooms ?? [];
     out.results = (out.results ?? []).map((r) => {
       const room = rooms.find((x) => x.inspectionId === r.inspectionId && x.locationId === r.locationId);
-      const distance = r.distance ?? r.overrides?.distance ?? room?.distance ?? "";
+      const distance = (r as unknown as { distance?: string }).distance ?? r.overrides?.distance ?? room?.distance ?? "";
       return { ...r, distance, overrides: { ...EMPTY_OVERRIDES, ...r.overrides, distance: null } };
     });
     out.rooms = rooms.map((x) => ({ ...x, distance: "" }));
     out.organizations = (out.organizations ?? []).map((o) =>
       o.isDemo && o.name === "Demo Thermography Co. (Fictional)" ? { ...o, name: "Infinite Infrared LLC", isDemo: false } : o);
+  }
+  if (version < 4) {
+    // One result -> one thermal image entry holding its former measurement
+    // fields, so every saved record exports exactly as before.
+    type Legacy = InspectionResult & { component?: string; distance?: string; irImageNumber?: string; visualImageNumber?: string; maxTemp?: string; possibleCause?: string; problemNotes?: string; visualFromSinglePhoto?: boolean };
+    out.results = (out.results ?? []).map((raw) => {
+      const r = raw as Legacy;
+      if (Array.isArray(r.images) && r.images.length) return { ...r, exception: r.exception ?? null };
+      const ir = (r.irImageNumber ?? "").trim();
+      const vis = (r.visualImageNumber ?? "").trim();
+      const image = newThermalImage({
+        component: r.component ?? "",
+        irImageNumber: ir,
+        visualOverridden: vis !== ir, // keeps a blank or different Visual # exactly as it was
+        visualImageNumber: vis,
+        distance: r.distance ?? "",
+        possibleCause: r.possibleCause || POSSIBLE_CAUSE_NONE,
+        maxTemp: r.maxTemp ?? "",
+        notes: r.problemNotes ?? "",
+      });
+      const rest = { ...r } as Record<string, unknown>;
+      for (const k of ["component", "distance", "irImageNumber", "visualImageNumber", "maxTemp", "possibleCause", "problemNotes", "visualFromSinglePhoto"]) delete rest[k];
+      return { ...(rest as unknown as InspectionResult), images: [image], exception: null };
+    });
+    out.rooms = (out.rooms ?? []).map((x) => ({ ...x, conditionsCopiedFrom: x.conditionsCopiedFrom ?? null, completedAt: x.completedAt ?? null }));
   }
   out.schemaVersion = SCHEMA_VERSION;
   return out;

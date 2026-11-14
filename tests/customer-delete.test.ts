@@ -15,7 +15,7 @@ function makeCustomer(name: string, equipmentCount: number) {
   })), "list.pdf");
   const inspectionId = S().createInspection({ customerId, facilityId, date: "2026-11-13", inspectorIds: ["user-ashton"], carryForward: true });
   const resultId = S().results.find((r) => r.inspectionId === inspectionId)!.id;
-  S().updateResult(resultId, { distance: "4", irImageNumber: "101" });
+  S().updateThermalImage(resultId, S().results.find((r) => r.id === resultId)!.images[0].id, { distance: "4", irImageNumber: "101" });
   const photo = (id: string, kind: Photo["kind"]): Omit<Photo, "organizationId" | "savedAt"> => ({
     id, inspectionId, facilityId, kind, building: "", resultId: kind === "equipment" ? resultId : null, fileName: "a.jpg", mimeType: "image/jpeg", sizeBytes: 3, capturedAt: "2026-11-13T12:00:00.000Z",
   });

@@ -79,7 +79,11 @@ export function AddRoomSheet({ open, onClose, inspectionId, previous, knownBuild
     if (!v.name.trim()) return;
     const building = v.building.trim();
     const locationId = createRoom(inspectionId, { name: v.name.trim(), building, area: "" },
-      { humidity: v.humidity, ambientTemp: v.ambientTemp, backgroundTemp: v.backgroundTemp });
+      {
+        humidity: v.humidity, ambientTemp: v.ambientTemp, backgroundTemp: v.backgroundTemp,
+        // Copied values are flagged until the inspector confirms or edits them in this room.
+        conditionsCopiedFrom: copy && previous && v.humidity === previous.room.humidity && v.ambientTemp === previous.room.ambientTemp && v.backgroundTemp === previous.room.backgroundTemp && (v.humidity || v.ambientTemp || v.backgroundTemp) ? previous.location.name : null,
+      });
     onCreated(locationId, building);
   };
   return (

@@ -63,19 +63,20 @@ describe("inspection workflow", () => {
     expect(S().inspections.find((i) => i.id === inspectionId)?.status).toBe("In Progress");
 
     const res = (id: string) => S().results.find((r) => r.id === id)!;
-    expect(res(p1).component).toBe("Full Panel");
-    expect(res(t1).component).toBe("Full Transformer");
+    const img = (id: string) => res(id).images[0];
+    expect(img(p1).component).toBe("Full Panel");
+    expect(img(t1).component).toBe("Full Transformer");
     expect(res(p1).opened).toBe("Yes, Completely");
-    expect(res(p1).possibleCause).toBe("NONE");
-    expect(res(p1).maxTemp).toBe("");
-    expect([res(p1).distance, res(p2).distance, res(t1).distance]).toEqual(["4", "6", "3"]);
+    expect(img(p1).possibleCause).toBe("NONE");
+    expect(img(p1).maxTemp).toBe("");
+    expect([img(p1).distance, img(p2).distance, img(t1).distance]).toEqual(["4", "6", "3"]);
 
-    S().updateResult(p1, { component: "Circuit 11", maxTemp: "131.7 °F", possibleCause: "Loose Connection(s)", problemNotes: "Lug hot" });
+    S().updateThermalImage(p1, img(p1).id, { component: "Circuit 11", maxTemp: "131.7 °F", possibleCause: "Loose Connection(s)", notes: "Lug hot" });
     S().setOverride(t1, "ambientTemp", "85");
     const dup = S().duplicateResult(p1)!;
     const dupRow = res(dup);
     expect(S().equipment.find((e) => e.id === dupRow.equipmentId)?.name).toBe("Panel P2");
-    expect([dupRow.irImageNumber, dupRow.maxTemp, dupRow.distance, dupRow.possibleCause]).toEqual(["", "", "", "NONE"]);
+    expect([dupRow.images[0].irImageNumber, dupRow.images[0].maxTemp, dupRow.images[0].distance, dupRow.images[0].possibleCause]).toEqual(["", "", "", "NONE"]);
 
     S().updateRoomConditions(rc1.id, { ambientTemp: "76" });
 
@@ -120,8 +121,10 @@ describe("inspection workflow", () => {
     expect(rows).toHaveLength(4);
     for (const row of rows) {
       expect(row.opened).toBe("Yes, Completely");
-      expect(row.possibleCause).toBe("NONE");
-      expect([row.maxTemp, row.distance, row.irImageNumber, row.visualImageNumber, row.problemNotes]).toEqual(["", "", "", "", ""]);
+      expect(row.images).toHaveLength(1);
+      expect(row.images[0].possibleCause).toBe("NONE");
+      expect([row.images[0].maxTemp, row.images[0].distance, row.images[0].irImageNumber, row.images[0].visualImageNumber, row.images[0].notes]).toEqual(["", "", "", "", ""]);
+      expect(row.exception).toBeNull();
     }
     expect(S().rooms.filter((x) => x.inspectionId === id)).toHaveLength(2);
     expect(S().photos.filter((p) => p.inspectionId === id)).toHaveLength(0);
@@ -137,7 +140,7 @@ describe("inspection workflow", () => {
     const room = S().createRoomForInspection(id, { building: "", name: "Room", area: "" });
     S().addResult(id, room, { name: "Panel P1", equipmentType: "Panel" });
     const ds = datasetFor(id);
-    ds.results[0] = { ...ds.results[0], maxTemp: "hot", opened: "Open" };
+    ds.results[0] = { ...ds.results[0], images: [{ ...ds.results[0].images[0], maxTemp: "hot" }], opened: "Open" };
     const issues = validateInspection(ds, { allowedCauses: ["NONE"] });
     expect(issues.filter((i) => i.severity === "error").map((i) => i.field)).toEqual(expect.arrayContaining(["Max Temp", "Opened"]));
   });

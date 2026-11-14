@@ -3,14 +3,16 @@
 import Link from "next/link";
 import { useParams, useRouter } from "next/navigation";
 import { useMemo, useState } from "react";
-import { AlertCircle, AlertTriangle, CheckCircle2, Download, Info, ShieldCheck } from "lucide-react";
+import { AlertCircle, AlertTriangle, CheckCircle2, Download, FileSpreadsheet, Info, ShieldCheck } from "lucide-react";
+import { exportInspectionXlsx } from "@/lib/export-excel";
+import { inspectorNames } from "@/components/forms/thermographer-picker";
 import { Button } from "@/components/ui/button";
 import { Card, CardBody, CardHeader } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { EmptyState } from "@/components/ui/misc";
 import { InspectionHeader } from "@/components/inspection/inspection-header";
 import { toast } from "@/components/ui/toast";
-import { useCustomers, useFacilities, useInspectionBundle, useOrganization } from "@/lib/store/hooks";
+import { useCustomers, useFacilities, useInspectionBundle, useOrganization, useUsers } from "@/lib/store/hooks";
 import { useStore } from "@/lib/store/store";
 import { countBySeverity, type Severity } from "@/lib/domain/validation";
 import { GENERATOR_COLUMNS, GENERATOR_HEADERS, buildGeneratorRows, exportFileName, parseCsv, toCsv } from "@/lib/domain/csv";
@@ -32,9 +34,11 @@ export default function ReviewPage() {
   const org = useOrganization();
   const customers = useCustomers();
   const facilities = useFacilities();
+  const users = useUsers();
   const setStatus = useStore((s) => s.setInspectionStatus);
   const logEvent = useStore((s) => s.logEvent);
   const [show, setShow] = useState<Severity | "all">("all");
+  const [exporting, setExporting] = useState(false);
   const field = useFieldState(id);
 
   const rows = useMemo(() => (bundle ? buildGeneratorRows(bundle.dataset) : []), [bundle]);
@@ -59,6 +63,19 @@ export default function ReviewPage() {
     toast(`Exported ${rows.length} rows`);
   };
 
+  const exportXlsx = async () => {
+    setExporting(true);
+    try {
+      const n = await exportInspectionXlsx(dataset, { customer, facility, inspectionDate: inspection.date, thermographers: inspectorNames(inspection.inspectorIds, users) });
+      logEvent(inspection.id, "Excel workbook exported", `${n} Generator rows (one per thermal image), 16 columns${counts.error ? `, ${counts.error} unresolved errors` : ""}`);
+      toast(`Excel workbook exported: ${n} rows`);
+    } catch (e) {
+      toast(e instanceof Error ? `Excel export failed: ${e.message}` : "Excel export failed", "error");
+    } finally {
+      setExporting(false);
+    }
+  };
+
   const jump = (resultId: string | null, locationId: string | null) => {
     if (!resultId) return;
     router.push(`/inspections/${id}/entry?${locationId ? `room=${locationId}&` : ""}focus=${resultId}`);
@@ -70,8 +87,11 @@ export default function ReviewPage() {
       <div className="grid gap-6 xl:grid-cols-[minmax(0,1fr)_380px]">
         <div className="min-w-0 space-y-6">
           <Card>
-            <CardHeader title="Generator CSV" description={`Exact 16 column layout · ${rows.length} rows · ${includeBom ? "UTF-8 with BOM" : "UTF-8 without BOM"} · CRLF line endings`}
-              actions={<Button variant="primary" onClick={exportCsv} disabled={rows.length === 0}><Download className="h-4 w-4" />Export CSV</Button>} />
+            <CardHeader title="Generator export" description={`Exact 16 column layout · ${rows.length} rows (one per thermal image) · Excel .xlsx with typed cells; CSV kept for compatibility`}
+              actions={<>
+                <Button variant="primary" size="lg" onClick={exportXlsx} disabled={rows.length === 0 || exporting} data-testid="export-xlsx"><FileSpreadsheet className="h-4 w-4" />{exporting ? "Exporting…" : "Export to Excel"}</Button>
+                <Button size="sm" variant="ghost" onClick={exportCsv} disabled={rows.length === 0}><Download className="h-3.5 w-3.5" />CSV (compatibility)</Button>
+              </>} />
             <div className="max-h-[520px] overflow-auto">
               <table className="w-full border-collapse text-xs">
                 <thead>

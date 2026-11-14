@@ -23,11 +23,13 @@ import { useFieldUi } from "@/lib/store/field-ui";
 import { useBeginFieldWork } from "@/lib/store/field-actions";
 import { useKeyboardOpen } from "@/lib/use-viewport";
 import { countBySeverity } from "@/lib/domain/validation";
-import { LIMITED_ACCESS_OPENED, POSSIBLE_CAUSE_NONE } from "@/lib/domain/constants";
+import { LIMITED_ACCESS_OPENED } from "@/lib/domain/constants";
 import { defaultComponentForType } from "@/lib/domain/rules";
 import { locationLabel } from "@/lib/domain/csv";
 import { formatDateTime } from "@/lib/format";
 import { usePhotoUrl } from "@/lib/photos/use-photo-url";
+import { imageHasFinding, resultHasFinding, resultStatus, roomProgress } from "@/lib/domain/thermal";
+import { RoomCheckpoint, RoomStatusBanner } from "@/components/field/room-checkpoint";
 import type { Equipment, Location } from "@/lib/domain/types";
 
 type RowFilter = "all" | "problems" | "missing-image" | "limited" | "overrides" | "single-photo";
@@ -74,39 +76,49 @@ function CardThumb({ photoId }: { photoId: string | null }) {
   return <div className="h-14 w-14 shrink-0 overflow-hidden rounded-lg bg-slate-100">{url ? <img src={url} alt="" className="h-full w-full object-cover" /> : null}</div>;
 }
 
-/** An item counts as recorded once something was captured for it this visit. */
-function isRecorded(r: GridRow["result"], photoCount: number): boolean {
-  return !!(r.irImageNumber || r.visualImageNumber || r.distance || photoCount || LIMITED_ACCESS_OPENED.includes(r.opened) || r.maxTemp);
-}
+const CARD_STATUS = {
+  todo: { label: "To do", bar: "bg-slate-200", chip: "text-slate-400" },
+  recorded: { label: "Done", bar: "bg-emerald-500", chip: "text-emerald-700" },
+  "not-scanned": { label: "Not scanned", bar: "bg-amber-400", chip: "text-amber-800" },
+  deferred: { label: "Deferred", bar: "bg-amber-400", chip: "text-amber-800" },
+} as const;
 
 function EquipmentCard({ row, onOpen, photoCount, firstPhotoId }: { row: GridRow; onOpen: () => void; photoCount: number; firstPhotoId: string | null }) {
   const r = row.result;
-  const recorded = isRecorded(r, photoCount);
-  const problem = r.possibleCause && r.possibleCause !== POSSIBLE_CAUSE_NONE;
+  const status = resultStatus(r);
+  const st = CARD_STATUS[status];
+  const problem = resultHasFinding(r);
   const limited = LIMITED_ACCESS_OPENED.includes(r.opened);
-  const noImage = !r.irImageNumber && !r.visualImageNumber && !limited;
+  const maxT = r.images.map((i) => Number(i.maxTemp)).filter((n) => !Number.isNaN(n) && n > 0);
   return (
-    <button onClick={onOpen} data-result-id={r.id}
+    <button onClick={onOpen} data-result-id={r.id} data-status={status}
       className={cn("flex w-full items-stretch gap-3 rounded-xl border bg-white p-3 text-left shadow-xs active:bg-slate-50",
         problem ? "border-thermal-300 ring-1 ring-thermal-200" : "border-slate-200")}>
-      <div className={cn("w-1 shrink-0 rounded-full", problem ? "bg-thermal-500" : limited ? "bg-amber-400" : recorded ? "bg-emerald-500" : "bg-slate-200")} />
+      <div className={cn("w-1 shrink-0 rounded-full", problem ? "bg-thermal-500" : st.bar)} />
       <CardThumb photoId={firstPhotoId} />
       <div className="min-w-0 flex-1">
         <div className="flex items-baseline justify-between gap-2">
           <span className="truncate text-base font-semibold text-slate-900">{row.equipment?.name || "(unnamed)"}</span>
-          {r.maxTemp ? <span className="shrink-0 text-sm font-semibold tabular-nums text-slate-900">{r.maxTemp}°F</span>
-            : recorded ? <CheckCircle2 className="h-4 w-4 shrink-0 text-emerald-600" aria-label="Recorded" /> : <span className="shrink-0 text-[11px] font-medium text-slate-400">To do</span>}
+          {maxT.length ? <span className="shrink-0 text-sm font-semibold tabular-nums text-slate-900">{Math.max(...maxT)}°F</span>
+            : status === "recorded" ? <CheckCircle2 className="h-4 w-4 shrink-0 text-emerald-600" aria-label="Done" /> : <span className={cn("shrink-0 text-[11px] font-medium", st.chip)}>{st.label}</span>}
         </div>
-        <div className="truncate text-sm text-slate-600">{r.component || <span className="text-slate-400">No component</span>}</div>
-        <div className="mt-1.5 flex flex-wrap gap-1.5 text-xs">
-          <span className={cn("rounded-md px-1.5 py-0.5 tabular-nums", noImage ? "bg-slate-100 text-slate-400" : "bg-slate-100 text-slate-700")}>
-            IR {r.irImageNumber || "?"} · Vis {r.visualImageNumber || "?"}{r.visualFromSinglePhoto ? " *" : ""}
-          </span>
-          {r.distance ? <span className="rounded-md bg-slate-100 px-1.5 py-0.5 tabular-nums text-slate-700">{r.distance} ft</span> : null}
-          <span className={cn("rounded-md px-1.5 py-0.5", limited ? "bg-amber-100 text-amber-900" : "bg-slate-100 text-slate-600")}>{SHORT_OPENED[r.opened] ?? r.opened}</span>
-          {problem ? <span className="rounded-md bg-thermal-100 px-1.5 py-0.5 font-medium text-thermal-800">{r.possibleCause}</span> : null}
-          {photoCount ? <span className="inline-flex items-center gap-1 rounded-md bg-sky-50 px-1.5 py-0.5 text-sky-700"><Camera className="h-3 w-3" />{photoCount}</span> : null}
+        <div className="mt-1 space-y-0.5">
+          {r.images.map((img, i) => (
+            <div key={img.id} className="flex items-center gap-1.5 text-xs">
+              <span className="truncate text-slate-600">{r.images.length > 1 ? `${i + 1}. ` : ""}{img.component || "No component"}</span>
+              <span className={cn("shrink-0 rounded px-1 tabular-nums", img.irImageNumber ? "bg-slate-100 text-slate-700" : "text-slate-400")}>IR {img.irImageNumber || "?"}{img.visualOverridden ? ` / V ${img.visualImageNumber || "?"}` : ""}</span>
+              {img.distance ? <span className="shrink-0 rounded bg-slate-100 px-1 tabular-nums text-slate-700">{img.distance} ft</span> : null}
+              {imageHasFinding(img) ? <span className="truncate rounded bg-thermal-100 px-1 font-medium text-thermal-800">{img.possibleCause}</span> : null}
+            </div>
+          ))}
         </div>
+        {limited || r.exception || photoCount ? (
+          <div className="mt-1 flex flex-wrap gap-1.5 text-xs">
+            {limited ? <span className="rounded-md bg-amber-100 px-1.5 py-0.5 text-amber-900">{SHORT_OPENED[r.opened] ?? r.opened}</span> : null}
+            {r.exception ? <span className="rounded-md bg-amber-100 px-1.5 py-0.5 font-medium text-amber-900">{r.exception.kind === "deferred" ? "Deferred" : "Not scanned"}</span> : null}
+            {photoCount ? <span className="inline-flex items-center gap-1 rounded-md bg-sky-50 px-1.5 py-0.5 text-sky-700"><Camera className="h-3 w-3" />{photoCount}</span> : null}
+          </div>
+        ) : null}
       </div>
     </button>
   );
@@ -136,7 +148,7 @@ function EntryWorkspace() {
   const [q, setQ] = useState("");
   const [filter, setFilter] = useState<RowFilter>("all");
   const [showFilters, setShowFilters] = useState(false);
-  const [sheet, setSheet] = useState<null | "add-room" | "pick-room" | "conditions" | "add-eq" | "edit-eq">(null);
+  const [sheet, setSheet] = useState<null | "add-room" | "pick-room" | "conditions" | "add-eq" | "edit-eq" | "checkpoint">(null);
   const [editId, setEditId] = useState<string | null>(null);
 
   const rooms: RoomEntry[] = useMemo(() => {
@@ -186,13 +198,13 @@ function EntryWorkspace() {
       .filter((r) => selected === "all" || r.locationId === selected)
       .map((r) => ({ result: r, equipment: eqMap.get(r.equipmentId), location: locMap.get(r.locationId), room: dataset.rooms.find((x) => x.locationId === r.locationId) }))
       .filter(({ result: r, equipment: e }) => {
-        if (s && ![e?.name ?? "", r.component, r.irImageNumber, r.visualImageNumber, r.problemNotes].some((x) => x.toLowerCase().includes(s))) return false;
+        if (s && ![e?.name ?? "", ...r.images.flatMap((i) => [i.component, i.irImageNumber, i.visualImageNumber, i.notes])].some((x) => x.toLowerCase().includes(s))) return false;
         switch (filter) {
-          case "problems": return r.possibleCause !== POSSIBLE_CAUSE_NONE;
-          case "missing-image": return !r.irImageNumber && !r.visualImageNumber;
-          case "limited": return LIMITED_ACCESS_OPENED.includes(r.opened);
+          case "problems": return resultHasFinding(r);
+          case "missing-image": return resultStatus(r) === "todo";
+          case "limited": return LIMITED_ACCESS_OPENED.includes(r.opened) || !!r.exception;
           case "overrides": return Object.values(r.overrides).some((v) => v !== null);
-          case "single-photo": return r.visualFromSinglePhoto;
+          case "single-photo": return r.images.some((i) => i.visualOverridden);
           default: return true;
         }
       })
@@ -220,23 +232,21 @@ function EntryWorkspace() {
   const lastEq = roomResults.length ? eqMap.get([...roomResults].sort((a, b) => b.sortOrder - a.sortOrder)[0].equipmentId) : undefined;
   const suggestions = nameSuggestions(roomNames);
   const lastType = lastEq?.equipmentType ?? "Panel";
-  const createDefaults = { name: suggestions[0] ?? "", type: lastType, component: defaultComponentForType(lastType) || (lastEq ? dataset.results.find((r) => r.equipmentId === lastEq.id)?.component ?? "" : "Full Panel") };
+  const createDefaults = { name: suggestions[0] ?? "", type: lastType, component: defaultComponentForType(lastType) || (lastEq ? dataset.results.find((r) => r.equipmentId === lastEq.id)?.images[0]?.component ?? "" : "Full Panel") };
   const photoCount = (rid: string) => photos.filter((p) => p.resultId === rid).length;
   const firstPhoto = (rid: string) => photos.find((p) => p.resultId === rid)?.id ?? null;
   const facilityNames = allEquipment.filter((e) => e.facilityId === inspection.facilityId).map((e) => e.name);
-  const recordedInRoom = gridRows.filter((g) => isRecorded(g.result, photoCount(g.result.id))).length;
-  // Walk-through: at the end of a room, offer the next room's first item.
+  const progress = roomProgress(roomResults);
+  // Walk-through: rooms in order; the next room is the next one not yet finished.
   const roomIdx = rooms.findIndex((r) => r.location.id === selected);
-  const nextRoom = roomIdx >= 0 ? rooms.slice(roomIdx + 1).find((r) => r.count > 0) : undefined;
-  const onEndOfList = selected !== "all" && nextRoom && !filtered ? {
-    label: `Next Room: ${nextRoom.location.name}`,
-    go: () => {
-      const first = dataset.results.filter((r) => r.locationId === nextRoom.location.id).sort((a, b) => a.sortOrder - b.sortOrder)[0];
-      selectRoom(nextRoom.location.id);
-      if (first) setEditId(first.id); else setSheet(null);
-      toast(`Now in ${nextRoom.location.name}`);
-    },
-  } : null;
+  const nextRoom = roomIdx >= 0 ? (rooms.slice(roomIdx + 1).find((r) => !r.room.completedAt) ?? rooms.slice(roomIdx + 1)[0]) : undefined;
+  const checkpointItems = [...roomResults].sort((a, b) => a.sortOrder - b.sortOrder).map((r) => ({ result: r, equipment: eqMap.get(r.equipmentId) }));
+  const goToNextRoom = () => {
+    if (!nextRoom) { setSheet(null); return; }
+    selectRoom(nextRoom.location.id);
+    setSheet(null);
+    toast(`Now in ${nextRoom.location.name}`);
+  };
 
   const onRoomCreated = (locationId: string, building: string) => {
     const wasRequired = field.required.includes(building);
@@ -289,7 +299,12 @@ function EntryWorkspace() {
         <EquipmentSheet open mode={sheet === "add-eq" ? "create" : "edit"} onClose={() => setSheet(null)} inspection={inspection}
           locationId={current?.location.id ?? null} room={current?.room ?? (editId ? dataset.rooms.find((x) => x.locationId === dataset.results.find((r) => r.id === editId)?.locationId) : undefined)}
           rows={gridRows} editId={editId} onNavigate={(rid) => setEditId(rid)} defaults={createDefaults} suggestions={suggestions}
-          facilityNames={facilityNames} onEndOfList={onEndOfList} />
+          facilityNames={facilityNames} roomName={current?.location.name}
+          onEndOfRoom={selected !== "all" && !filtered ? () => setSheet("checkpoint") : undefined} />
+      ) : null}
+      {current && sheet === "checkpoint" ? (
+        <RoomCheckpoint open onClose={() => setSheet(null)} room={current.room} location={current.location} items={checkpointItems} nextRoom={nextRoom?.location ?? null}
+          onGoToItem={(rid) => { setEditId(rid); setSheet("edit-eq"); }} onNextRoom={goToNextRoom} />
       ) : null}
     </>
   );
@@ -330,11 +345,26 @@ function EntryWorkspace() {
                 <Button variant="primary" className="h-auto min-h-12 shrink-0 px-4 text-base" onClick={() => setSheet("add-room")}><Plus className="h-5 w-5" />Add Room</Button>
               </div>
               {current ? (
-                <button onClick={() => setSheet("conditions")} className="mt-2 flex w-full items-center gap-2 rounded-lg px-1 py-1.5 text-left text-sm text-slate-600 active:bg-slate-100">
-                  <SlidersHorizontal className="h-4 w-4 shrink-0 text-slate-400" />
-                  <span className={cn("flex-1 truncate", !(current.room.humidity && current.room.ambientTemp && current.room.backgroundTemp) && "font-medium text-amber-700")}>{conditionSummary(current.room)}</span>
-                  <span className="text-xs font-medium text-thermal-700">Edit</span>
-                </button>
+                <>
+                  <div className="mt-2"><RoomStatusBanner room={current.room} onEdit={() => setSheet("conditions")} /></div>
+                  <button onClick={() => setSheet("conditions")} className="mt-1 flex w-full items-center gap-2 rounded-lg px-1 py-1.5 text-left text-sm text-slate-600 active:bg-slate-100">
+                    <SlidersHorizontal className="h-4 w-4 shrink-0 text-slate-400" />
+                    <span className="flex-1 truncate">{conditionSummary(current.room)}</span>
+                    <span className="text-xs font-medium text-thermal-700">Edit</span>
+                  </button>
+                  {progress.total ? (
+                    <div className="mt-2 flex items-center gap-3 rounded-lg bg-slate-50 px-3 py-2" data-testid="room-progress">
+                      <div className="min-w-0 flex-1">
+                        <div className="flex justify-between text-xs font-medium text-slate-700">
+                          <span>Equipment {progress.total} · Done {progress.done}</span>
+                          <span className={progress.remaining.length ? "font-semibold text-slate-900" : "text-emerald-700"}>{progress.remaining.length ? `${progress.remaining.length} remaining` : current.room.completedAt ? "Room finished" : "All addressed"}</span>
+                        </div>
+                        <div className="mt-1 h-2 overflow-hidden rounded-full bg-slate-200"><div className="h-full rounded-full bg-emerald-500" style={{ width: `${Math.round((progress.done / progress.total) * 100)}%` }} /></div>
+                      </div>
+                      <Button className="h-10 shrink-0" variant={progress.remaining.length || current.room.completedAt ? "secondary" : "dark"} onClick={() => setSheet("checkpoint")}>{current.room.completedAt ? "Next Room" : "Finish Room"}</Button>
+                    </div>
+                  ) : null}
+                </>
               ) : null}
             </div>
           )}
@@ -351,18 +381,12 @@ function EntryWorkspace() {
               </div>
               {showFilters ? (
                 <div className="-mx-1 flex gap-1.5 overflow-x-auto px-1 pb-1">
-                  {([["all", "All"], ["problems", "Problems"], ["missing-image", "No image #"], ["limited", "Not opened"], ["single-photo", "Verify Vis #"], ["overrides", "Overrides"]] as [RowFilter, string][]).map(([k, l]) => (
+                  {([["all", "All"], ["missing-image", "To do"], ["problems", "Findings"], ["limited", "Not scanned / limited"], ["single-photo", "Different Vis #"], ["overrides", "Overrides"]] as [RowFilter, string][]).map(([k, l]) => (
                     <button key={k} onClick={() => setFilter(k)} className={cn("h-9 shrink-0 rounded-full border px-3 text-sm", filter === k ? "border-slate-900 bg-slate-900 text-white" : "border-slate-200 bg-white text-slate-700")}>{l}</button>
                   ))}
                 </div>
               ) : null}
 
-              {gridRows.length && selected !== "all" ? (
-                <div className="flex items-center gap-2 px-1 text-xs text-slate-600">
-                  <div className="h-1.5 flex-1 overflow-hidden rounded-full bg-slate-200"><div className="h-full rounded-full bg-emerald-500" style={{ width: `${Math.round((recordedInRoom / gridRows.length) * 100)}%` }} /></div>
-                  <span className="tabular-nums">{recordedInRoom} of {gridRows.length} recorded</span>
-                </div>
-              ) : null}
               {gridRows.length === 0 ? (
                 <div className="rounded-xl border border-dashed border-slate-300 px-4 py-8 text-center text-sm text-slate-500">
                   {filtered ? "No equipment matches." : "No equipment in this room yet. Tap Add Equipment below."}
@@ -422,7 +446,8 @@ function EntryWorkspace() {
             <Card><EmptyState icon={<ListPlus className="h-5 w-5" />} title="Add the first room" description="Create a room, enter humidity and temperatures once, then add equipment rapidly." action={<Button variant="primary" onClick={() => setSheet("add-room")}>Add room</Button>} /></Card>
           ) : (
             <>
-              {current ? <RoomConditionsCard entry={current} results={roomResults} inspectionDate={inspection.date} /> : (
+              {current ? <><RoomStatusBanner room={current.room} onEdit={() => setSheet("conditions")} /><RoomConditionsCard entry={current} results={roomResults} inspectionDate={inspection.date} />
+                {progress.total ? <div className="flex items-center justify-between rounded-lg border border-slate-200 bg-white px-4 py-2 text-sm" data-testid="room-progress"><span>Equipment {progress.total} · Done {progress.done} · <strong>{progress.remaining.length} remaining</strong>{current.room.completedAt ? " · Room finished" : ""}</span><Button size="sm" onClick={() => setSheet("checkpoint")}>{current.room.completedAt ? "Next Room" : "Finish Room"}</Button></div> : null}</> : (
                 <Card className="px-4 py-3 text-sm text-slate-600">Showing all {dataset.results.length} items across {rooms.length} rooms. Select a room to edit its conditions or quick add equipment.</Card>
               )}
               <QuickAddBar inspectionId={inspection.id} locationId={current ? current.location.id : null} disabled={!current} />
@@ -436,9 +461,9 @@ function EntryWorkspace() {
                   <Select className="w-52 pl-9" value={filter} onChange={(e) => setFilter(e.target.value as RowFilter)} aria-label="Filter rows">
                     <option value="all">All rows</option>
                     <option value="problems">Problems documented</option>
-                    <option value="missing-image">Missing image number</option>
-                    <option value="limited">Not opened / inaccessible / off</option>
-                    <option value="single-photo">Single photo, verify Visual #</option>
+                    <option value="missing-image">To do (not inspected)</option>
+                    <option value="limited">Not scanned / limited access</option>
+                    <option value="single-photo">Different Visual #</option>
                     <option value="overrides">Rows with overrides</option>
                   </Select>
                 </div>
@@ -460,7 +485,7 @@ function EntryWorkspace() {
                 <EquipmentGrid rows={gridRows} inspection={inspection} causes={causes} showRoomHeaders={selected === "all"} locations={locations} />
               )}
               <p className="text-xs text-slate-500">
-                Tips: Enter moves down a column, Shift+Enter moves up, Esc cancels a cell edit. Blank Distance inherits the room value (shown in gray). Expand a row (›) for humidity and temperature overrides, problem notes, and review notes.
+                Tips: Enter moves down a column, Shift+Enter moves up, Esc cancels a cell edit. Each thermal image is its own row; use + on a row to add another image (Top Half, Section 2...). Visual # follows IR # unless you type a different one. Expand a row (›) for overrides, notes and Not scanned.
               </p>
             </>
           )}

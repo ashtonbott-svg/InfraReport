@@ -16,7 +16,7 @@ export const MAX_PHOTO_BYTES = 40 * 1024 * 1024;
  */
 export async function persistPhoto(
   file: File,
-  meta: Pick<Photo, "inspectionId" | "facilityId" | "kind" | "building" | "resultId">,
+  meta: Pick<Photo, "inspectionId" | "facilityId" | "kind" | "building" | "resultId"> & { note?: string },
 ): Promise<string> {
   if (!file.type.startsWith("image/") && !/\.(jpe?g|png|heic|heif|webp)$/i.test(file.name)) throw new Error("That file is not an image.");
   if (file.size > MAX_PHOTO_BYTES) throw new Error("Photo is larger than 40 MB.");

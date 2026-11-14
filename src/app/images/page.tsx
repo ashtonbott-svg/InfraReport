@@ -40,10 +40,12 @@ export default function ImagesPage() {
     return m;
   }, [imgs]);
 
-  const referenced = new Set(rows.flatMap((r) => [r.irImageNumber, r.visualImageNumber].filter(Boolean).map(norm)));
+  // One line per thermal image entry.
+  const lines = rows.flatMap((r) => r.images.map((img, idx) => ({ r, img, idx })));
+  const referenced = new Set(lines.flatMap(({ img }) => [img.irImageNumber, img.visualImageNumber].filter(Boolean).map(norm)));
   const unmatched = imgs.filter((i) => !referenced.has(norm(i.imageNumber)));
-  const missing = rows.filter((r) => (r.irImageNumber && !byNumber.has(norm(r.irImageNumber))) || (r.visualImageNumber && !byNumber.has(norm(r.visualImageNumber))));
-  const noNumber = rows.filter((r) => !r.irImageNumber && !r.visualImageNumber && !LIMITED_ACCESS_OPENED.includes(r.opened));
+  const missing = lines.filter(({ img }) => (img.irImageNumber && !byNumber.has(norm(img.irImageNumber))) || (img.visualImageNumber && !byNumber.has(norm(img.visualImageNumber))));
+  const noNumber = rows.filter((r) => !r.images.some((i) => i.irImageNumber || i.visualImageNumber) && !LIMITED_ACCESS_OPENED.includes(r.opened) && !r.exception);
 
   const onFiles = (list: FileList | null) => {
     if (!list || !inspectionId) return;
@@ -112,12 +114,12 @@ export default function ImagesPage() {
             <Table>
               <thead><tr><th className={th}>Equipment</th><th className={th}>Component</th><th className={th}>Thermal (IR #)</th><th className={th}>Visual #</th></tr></thead>
               <tbody>
-                {rows.map((r) => (
-                  <tr key={r.id}>
-                    <td className={`${td} font-medium text-slate-900`}>{equipment.find((e) => e.id === r.equipmentId)?.name}</td>
-                    <td className={td}>{r.component}</td>
-                    <td className={td}>{matchCell(r.irImageNumber)}</td>
-                    <td className={td}>{matchCell(r.visualImageNumber)}{r.visualFromSinglePhoto ? <Badge tone="amber" className="ml-2">single photo</Badge> : null}</td>
+                {lines.map(({ r, img, idx }) => (
+                  <tr key={img.id}>
+                    <td className={`${td} font-medium text-slate-900`}>{idx === 0 ? equipment.find((e) => e.id === r.equipmentId)?.name : <span className="pl-3 text-xs font-normal text-slate-400">image {idx + 1}</span>}</td>
+                    <td className={td}>{img.component}</td>
+                    <td className={td}>{matchCell(img.irImageNumber)}</td>
+                    <td className={td}>{matchCell(img.visualImageNumber)}{img.visualOverridden ? <Badge tone="amber" className="ml-2">different</Badge> : null}</td>
                   </tr>
                 ))}
               </tbody>

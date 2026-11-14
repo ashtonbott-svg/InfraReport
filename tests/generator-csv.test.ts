@@ -5,6 +5,7 @@ import {
 import { DEFAULT_EMISSIVITY, OPENED_VALUES, POSSIBLE_CAUSE_NONE } from "@/lib/domain/constants";
 import { EMPTY_OVERRIDES } from "@/lib/domain/rules";
 import { newSiteVisit } from "@/lib/domain/site-visit";
+import { newThermalImage } from "@/lib/domain/thermal";
 import type { Equipment, Inspection, InspectionResult, InspectionRoomConditions, Location } from "@/lib/domain/types";
 
 const EXPECTED = [
@@ -15,16 +16,22 @@ const EXPECTED = [
 const insp: Inspection = { id: "i1", organizationId: "o", customerId: "c", facilityId: "f", date: "2026-03-10", inspectorIds: ["u"], status: "In Progress", defaultEmissivity: DEFAULT_EMISSIVITY, notes: "", createdAt: "", updatedAt: "", siteVisit: newSiteVisit() };
 const loc1: Location = { id: "l1", organizationId: "o", facilityId: "f", building: "", name: "Electrical Room 1", area: "", sortOrder: 1 };
 const loc2: Location = { id: "l2", organizationId: "o", facilityId: "f", building: "Building B", name: "MCC Room", area: "", sortOrder: 2 };
-const room1: InspectionRoomConditions = { id: "rc1", organizationId: "o", inspectionId: "i1", locationId: "l1", humidity: "45", ambientTemp: "74", backgroundTemp: "73", distance: "4", imageDate: "" };
-const room2: InspectionRoomConditions = { id: "rc2", organizationId: "o", inspectionId: "i1", locationId: "l2", humidity: "", ambientTemp: "", backgroundTemp: "", distance: "", imageDate: "" };
+const room1: InspectionRoomConditions = { id: "rc1", organizationId: "o", inspectionId: "i1", locationId: "l1", humidity: "45", ambientTemp: "74", backgroundTemp: "73", distance: "", imageDate: "", conditionsCopiedFrom: null, completedAt: null };
+const room2: InspectionRoomConditions = { id: "rc2", organizationId: "o", inspectionId: "i1", locationId: "l2", humidity: "", ambientTemp: "", backgroundTemp: "", distance: "", imageDate: "", conditionsCopiedFrom: null, completedAt: null };
 const eq = (id: string, name: string, locationId = "l1"): Equipment => ({ id, organizationId: "o", facilityId: "f", locationId, name, equipmentType: "Panel", defaultComponent: "Full Panel", active: true, sortOrder: 1, createdAt: "" });
 let n = 0;
-const res = (equipmentId: string, patch: Partial<InspectionResult> = {}): InspectionResult => ({
-  id: `r${++n}`, organizationId: "o", inspectionId: "i1", equipmentId, locationId: "l1", component: "Full Panel", distance: "",
-  irImageNumber: "", visualImageNumber: "", visualFromSinglePhoto: false, maxTemp: "", opened: "Yes, Completely",
-  possibleCause: POSSIBLE_CAUSE_NONE, problemNotes: "", confidence: "", reviewNotes: "", overrides: { ...EMPTY_OVERRIDES },
-  source: "manual", sortOrder: n, createdAt: "", updatedAt: "", ...patch,
-});
+type ImageFields = { component?: string; irImageNumber?: string; visualImageNumber?: string; maxTemp?: string; possibleCause?: string; distance?: string };
+/** One result with a single thermal image (the pre-release-5 shape, expressed in the new model). */
+const res = (equipmentId: string, patch: Partial<InspectionResult> & ImageFields = {}): InspectionResult => {
+  const { component = "Full Panel", irImageNumber = "", visualImageNumber, maxTemp = "", possibleCause = POSSIBLE_CAUSE_NONE, distance = "", ...rest } = patch;
+  const vis = visualImageNumber ?? irImageNumber;
+  return {
+    id: `r${++n}`, organizationId: "o", inspectionId: "i1", equipmentId, locationId: "l1",
+    images: [newThermalImage({ component, irImageNumber, visualOverridden: vis !== irImageNumber, visualImageNumber: vis, maxTemp, possibleCause, distance })],
+    opened: "Yes, Completely", exception: null, confidence: "", reviewNotes: "", overrides: { ...EMPTY_OVERRIDES },
+    source: "manual", sortOrder: n, createdAt: "", updatedAt: "", ...rest,
+  };
+};
 
 function dataset(results: InspectionResult[], equipment: Equipment[]): ExportDataset {
   return { inspection: insp, results, equipment: new Map(equipment.map((e) => [e.id, e])), locations: new Map([[loc1.id, loc1], [loc2.id, loc2]]), rooms: [room1, room2] };
@@ -50,10 +57,10 @@ describe("Generator column layout", () => {
 describe("CSV export", () => {
   const equipment = [eq("e1", "Panel P1"), eq("e2", "Panel P2"), eq("e3", "Transformer T1"), eq("e4", "Disconnect D1"), eq("e5", "Starter S1", "l2")];
   const results = [
-    res("e1", { irImageNumber: "1021", visualImageNumber: "1022", maxTemp: "86.2" }),
-    res("e2", { component: "Circuit 11", irImageNumber: "1023", visualImageNumber: "1024", maxTemp: "131.7", possibleCause: "Loose Connection(s)", reviewNotes: 'Lug "hot", re-torque' }),
-    res("e3", { component: "Full Transformer", overrides: { ...EMPTY_OVERRIDES, distance: "6", humidity: "50" } }),
-    res("e4", { component: "Full Disconnect", opened: "Item is Locked Out" }), // no image number: must be kept
+    res("e1", { irImageNumber: "1021", visualImageNumber: "1022", maxTemp: "86.2", distance: "4" }),
+    res("e2", { component: "Circuit 11", irImageNumber: "1023", visualImageNumber: "1024", maxTemp: "131.7", possibleCause: "Loose Connection(s)", reviewNotes: 'Lug "hot", re-torque', distance: "4" }),
+    res("e3", { component: "Full Transformer", distance: "6", overrides: { ...EMPTY_OVERRIDES, humidity: "50" } }),
+    res("e4", { component: "Full Disconnect", opened: "Item is Locked Out", distance: "4" }), // no image number: must be kept
     res("e5", { component: "Full Starter", locationId: "l2", opened: "Can’t Open Item" }),
   ];
   const ds = dataset(results, equipment);

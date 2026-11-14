@@ -98,9 +98,11 @@ export interface EffectiveValues {
  * date. Emissivity falls back to the inspection default, then 0.95.
  */
 export function resolveEffective(
-  result: Pick<InspectionResult, "overrides"> & { distance?: string },
-  room: Pick<InspectionRoomConditions, "humidity" | "ambientTemp" | "backgroundTemp" | "distance" | "imageDate"> | undefined,
+  result: Pick<InspectionResult, "overrides">,
+  room: Pick<InspectionRoomConditions, "humidity" | "ambientTemp" | "backgroundTemp" | "imageDate"> | undefined,
   inspection: Pick<Inspection, "date" | "defaultEmissivity">,
+  /** The thermal image this row is for; distance is recorded per image. */
+  image?: { distance: string },
 ): EffectiveValues {
   const o = result.overrides;
   const overridden: EffectiveValues["overridden"] = {};
@@ -117,9 +119,9 @@ export function resolveEffective(
     humidity: pick("humidity", room?.humidity ?? ""),
     backgroundTemp: pick("backgroundTemp", room?.backgroundTemp ?? ""),
     ambientTemp: pick("ambientTemp", room?.ambientTemp ?? ""),
-    // Distance belongs to each equipment record (release 3). Legacy override /
-    // room values are only read if a record was never migrated.
-    distance: result.distance !== undefined && result.distance !== "" ? result.distance : pick("distance", room?.distance ?? ""),
+    // Distance belongs to each thermal image (release 5). Older room / row
+    // distances are moved onto images by the store migration.
+    distance: image?.distance ?? "",
     emissivity: pick("emissivity", inspection.defaultEmissivity || DEFAULT_EMISSIVITY),
     overridden,
   };
