@@ -422,12 +422,16 @@ create policy membership_same_org on public.memberships for select to authentica
   using (user_id = (select auth.uid()) or public.is_org_member(organization_id));
 
 -- customers / facilities: admins manage; technicians read what their assigned jobs need
-create policy customers_read on public.customers for select to authenticated using (public.can_access_customer(id));
+-- (is_org_admin is checked on the row itself so INSERT ... RETURNING works: a helper that
+--  re-queries the table cannot see the row being inserted by the same statement.)
+create policy customers_read on public.customers for select to authenticated
+  using (public.is_org_admin(organization_id) or public.can_access_customer(id));
 create policy customers_admin_insert on public.customers for insert to authenticated with check (public.is_org_admin(organization_id));
 create policy customers_admin_update on public.customers for update to authenticated using (public.is_org_admin(organization_id)) with check (public.is_org_admin(organization_id));
 create policy customers_admin_delete on public.customers for delete to authenticated using (public.is_org_admin(organization_id));
 
-create policy facilities_read on public.facilities for select to authenticated using (public.can_access_facility(id));
+create policy facilities_read on public.facilities for select to authenticated
+  using (public.is_org_admin(organization_id) or public.can_access_facility(id));
 create policy facilities_admin_insert on public.facilities for insert to authenticated with check (public.is_org_admin(organization_id));
 create policy facilities_admin_update on public.facilities for update to authenticated using (public.is_org_admin(organization_id)) with check (public.is_org_admin(organization_id));
 create policy facilities_admin_delete on public.facilities for delete to authenticated using (public.is_org_admin(organization_id));

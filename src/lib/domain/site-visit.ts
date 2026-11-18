@@ -48,11 +48,19 @@ export interface ExitCheck {
   missing: string[];
 }
 
-/** Pause / finish are only allowed once every required building has a saved photo. */
-export function checkExit(required: string[], photos: Photo[], inspectionId: string): ExitCheck {
+/**
+ * Pause / finish are only allowed once every required building has a saved photo.
+ * In collaborative (cloud) inspections the exterior photo is optional: photos
+ * stay on the phone that took them, so a teammate's missing photo must never
+ * block the other phone. Missing buildings are still listed as a reminder.
+ */
+export function checkExit(required: string[], photos: Photo[], inspectionId: string, optional = false): ExitCheck {
   const missing = missingExteriorBuildings(required, photos, inspectionId);
-  return { allowed: missing.length === 0, missing };
+  return { allowed: optional || missing.length === 0, missing };
 }
+
+/** Device-only inspections keep the required exterior photo; shared cloud inspections make it optional. */
+export const exteriorPhotoOptional = (inspection: Pick<Inspection, "organizationId">) => inspection.organizationId !== "org-demo";
 
 export function visitDayCount(inspection: Pick<Inspection, "siteVisit">): number {
   const days = new Set(inspection.siteVisit.sessions.map((s) => new Date(s.startedAt).toDateString()));

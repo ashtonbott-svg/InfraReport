@@ -13,7 +13,7 @@
     "prebuild": "npm run copy-pdf-worker",
     "predev": "npm run copy-pdf-worker",
     "check:layout": "node scripts/check-mobile-layout.cjs",
-    "test:integration": "vitest run tests/integration"
+    "test:integration": "vitest run tests/integration --no-file-parallelism"
   },
   "dependencies": {
     "@supabase/ssr": "^0.12.7",

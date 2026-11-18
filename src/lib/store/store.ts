@@ -7,7 +7,7 @@
  * is cleared. The action surface below mirrors the repository layer that will
  * be backed by Postgres/Supabase with row-level security per organization.
  */
-import { create } from "zustand";
+import { create, type StateCreator } from "zustand";
 import { createJSONStorage, persist } from "zustand/middleware";
 import {
   OTHER_EQUIPMENT_TYPE,
@@ -46,7 +46,7 @@ import type {
   User,
 } from "../domain/types";
 import { DEFAULT_ORG_ID as DEMO_ORG_ID, ASHTON_ID, LEGACY_DEMO_IDS, THERMOGRAPHERS, buildSeed } from "./seed";
-import { checkExit, newSiteVisit, requiredBuildings, type ExitCheck } from "../domain/site-visit";
+import { checkExit, exteriorPhotoOptional, newSiteVisit, requiredBuildings, type ExitCheck } from "../domain/site-visit";
 import { checkRoom, newThermalImage, patchThermalImage } from "../domain/thermal";
 import { trackedLocalStorage } from "./save-status";
 
@@ -188,9 +188,8 @@ function normalizePatch<T extends object>(patch: T): T {
   return out as T;
 }
 
-export const useStore = create<Store>()(
-  persist(
-    (set, get) => {
+/** All store actions. Exported so tests can create independent stores (one per simulated phone). */
+export const storeInitializer: StateCreator<Store> = (set, get) => {
       const org = () => get().currentOrgId;
       const touch = (inspectionId: ID) =>
         set((s) => ({ inspections: s.inspections.map((i) => (i.id === inspectionId ? { ...i, updatedAt: now() } : i)) }));
@@ -322,7 +321,8 @@ export const useStore = create<Store>()(
           const s = get();
           const rooms = s.rooms.filter((r) => r.inspectionId === inspectionId);
           const locs = new Map(s.locations.map((l) => [l.id, l]));
-          return checkExit(requiredBuildings(rooms, locs), s.photos, inspectionId);
+          const insp = s.inspections.find((i) => i.id === inspectionId);
+          return checkExit(requiredBuildings(rooms, locs), s.photos, inspectionId, !!insp && exteriorPhotoOptional(insp));
         },
         startSiteVisit(inspectionId) {
           const insp = get().inspections.find((i) => i.id === inspectionId);
@@ -664,7 +664,11 @@ export const useStore = create<Store>()(
           return { rooms: used.size, equipment: rows.length, newRooms };
         },
       };
-    },
+    };
+
+export const useStore = create<Store>()(
+  persist(
+    storeInitializer as StateCreator<Store, [], []>,
     {
       name: STORAGE_KEY,
       version: SCHEMA_VERSION,

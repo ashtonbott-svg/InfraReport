@@ -73,7 +73,9 @@ export function orderResults(ds: ExportDataset): InspectionResult[] {
     const la = lookup(ds.locations, a.locationId)?.sortOrder ?? 0;
     const lb = lookup(ds.locations, b.locationId)?.sortOrder ?? 0;
     if (la !== lb) return la - lb;
-    return a.sortOrder - b.sortOrder;
+    // Rooms created on two phones can share a sort position: keep each room's rows together.
+    if (a.locationId !== b.locationId) return a.locationId < b.locationId ? -1 : 1;
+    return a.sortOrder - b.sortOrder || a.createdAt.localeCompare(b.createdAt) || (a.id < b.id ? -1 : a.id > b.id ? 1 : 0);
   });
 }
 

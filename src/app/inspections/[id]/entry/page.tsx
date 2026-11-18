@@ -256,7 +256,7 @@ function EntryWorkspace() {
     const st = useStore.getState();
     const missing = st.exitCheck(inspection.id).missing;
     // Prompt only when this room introduces a building that needs its own photo.
-    if (isActive && !wasRequired && missing.includes(building) && field.exit.allowed) setTimeout(() => openExterior("start"), 250);
+    if (isActive && !field.optional && !wasRequired && missing.includes(building) && field.exit.allowed) setTimeout(() => openExterior("start"), 250);
   };
   const addExistingRoom = (locId: string) => {
     addRoomToInspection(inspection.id, locId);

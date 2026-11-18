@@ -11,7 +11,7 @@ import { PhotoCapture } from "./photo-capture";
 import { cn } from "@/lib/cn";
 import { useStore } from "@/lib/store/store";
 import { useCustomers, useFacilities, useInspections, useLocations, useResults, useRooms } from "@/lib/store/hooks";
-import { ANY_BUILDING, buildingLabel, checkExit, exteriorPhotosFor, requiredBuildings } from "@/lib/domain/site-visit";
+import { ANY_BUILDING, buildingLabel, checkExit, exteriorPhotoOptional, exteriorPhotosFor, requiredBuildings } from "@/lib/domain/site-visit";
 import { persistPhoto } from "@/lib/photos/capture";
 import { deletePhotoBlob } from "@/lib/photos/photo-db";
 import { usePhotoUrl } from "@/lib/photos/use-photo-url";
@@ -35,12 +35,13 @@ export function useFieldState(inspectionId: string | null) {
     const locMap = new Map(locations.map((l) => [l.id, l]));
     const inspRooms = rooms.filter((r) => r.inspectionId === inspection.id);
     const required = requiredBuildings(inspRooms, locMap);
-    const exit = checkExit(required, photos, inspection.id);
+    const optional = exteriorPhotoOptional(inspection);
+    const exit = checkExit(required, photos, inspection.id, optional);
     const exterior = exteriorPhotosFor(photos, inspection.id).sort((a, b) => a.savedAt.localeCompare(b.savedAt));
     const lastRoom = inspection.siteVisit.lastActiveLocationId ? locMap.get(inspection.siteVisit.lastActiveLocationId) : undefined;
     const knownBuildings = [...new Set(locations.filter((l) => l.facilityId === inspection.facilityId).map((l) => l.building.trim()).filter(Boolean))].sort();
     return {
-      inspection, facility, customer, required, exit, exterior, lastRoom, knownBuildings,
+      inspection, facility, customer, required, exit, exterior, lastRoom, knownBuildings, optional,
       roomCount: inspRooms.length,
       equipmentCount: results.filter((r) => r.inspectionId === inspection.id).length,
     };
@@ -108,7 +109,7 @@ export function ExteriorChecklist({ field, editable = true }: { field: FieldStat
             <li key={b} className={cn("flex items-center gap-2 rounded-lg px-3 py-2 text-sm", missing ? "bg-amber-50 text-amber-900" : "bg-emerald-50 text-emerald-900")}>
               {missing ? <AlertTriangle className="h-4 w-4 shrink-0" /> : <CheckCircle2 className="h-4 w-4 shrink-0" />}
               <span className="font-medium">{buildingLabel(b)}</span>
-              <span className="ml-auto text-xs">{missing ? "Photo required" : "Photo saved"}</span>
+              <span className="ml-auto text-xs">{missing ? (field.optional ? "Optional" : "Photo required") : "Photo saved"}</span>
             </li>
           );
         })}
