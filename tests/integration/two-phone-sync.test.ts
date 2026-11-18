@@ -31,7 +31,7 @@ async function sql(q: string, params: unknown[] = []) {
   try { return (await c.query(q, params)).rows; } finally { await c.end(); }
 }
 
-interface Net { down: boolean; loseNextInsertAnswer: boolean }
+interface Net { down: boolean; loseNextInsertAnswer: boolean; blockPath?: string }
 
 /** A phone: its own device store, its own outbox storage, its own network. */
 class Phone {
@@ -51,7 +51,7 @@ class Phone {
   async signIn(session: { access_token: string; refresh_token: string }) {
     const net = this.net;
     const wrapped: typeof fetch = async (input, init) => {
-      if (net.down) throw new TypeError("Failed to fetch");
+      if (net.down || (net.blockPath && String(input).includes(net.blockPath))) throw new TypeError("Failed to fetch");
       const res = await fetch(input, init);
       if (net.loseNextInsertAnswer && init?.method === "POST" && String(input).includes("/rest/v1/")) {
         net.loseNextInsertAnswer = false;
@@ -298,6 +298,25 @@ run("Two phones on one inspection (real Supabase, real store, real sync)", () =>
     expect(rowsJ).toEqual(rowsA);
     const irs = rowsA.map((r) => String(r[8])).filter(Boolean).sort();
     expect(irs).toEqual(expect.arrayContaining(["101", "205", "206", "301"]));
+  });
+
+  it("a submission waits until the technician's readings are in the database", async () => {
+    const r = justice.s.results.find((x) => x.inspectionId === inspId)!;
+    justice.net.blockPath = "/rest/v1/thermal_images"; // readings cannot upload, everything else can
+    justice.s.updateThermalImage(r.id, r.images[0].id, { maxTemp: "155" });
+    justice.s.setInspectionStatus(inspId, "Needs Review");
+    await justice.sync();
+    await justice.sync();
+    expect((await sql("select status from public.inspections where id = $1", [inspId]))[0].status).not.toBe("Needs Review");
+    justice.net.blockPath = undefined;
+    await justice.sync();
+    expect((await sql("select status from public.inspections where id = $1", [inspId]))[0].status).toBe("Needs Review");
+    expect((await sql("select max_temp from public.thermal_images where id = $1", [r.images[0].id]))[0].max_temp).toBe("155");
+    // Back to work for the next test.
+    await ashton.sync();
+    ashton.s.setInspectionStatus(inspId, "In Progress");
+    await ashton.sync();
+    await justice.sync();
   });
 
   it("technician can submit for review but cannot approve; the admin approves", async () => {

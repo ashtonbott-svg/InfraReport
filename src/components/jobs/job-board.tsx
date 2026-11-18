@@ -11,6 +11,7 @@ import { roomProgress } from "@/lib/domain/thermal";
 import { inspectorNames } from "@/components/forms/thermographer-picker";
 import { formatDate, todayISO } from "@/lib/format";
 import type { Inspection } from "@/lib/domain/types";
+import { DownloadExcelButton } from "@/components/inspection/download-excel";
 
 export type JobGroup = "active" | "upcoming" | "submitted" | "approved";
 
@@ -24,7 +25,7 @@ export function jobGroup(i: Inspection, today: string): JobGroup {
 export const GROUP_LABEL: Record<JobGroup, string> = { active: "Active", upcoming: "Upcoming", submitted: "Submitted for review", approved: "Approved / completed" };
 
 /** Job cards: customer, facility, address, date, technicians, room and equipment progress, Start/Resume. */
-export function JobBoard({ onlyUserId, groups = ["active", "upcoming", "submitted", "approved"], empty }: { onlyUserId?: string; groups?: JobGroup[]; empty?: React.ReactNode }) {
+export function JobBoard({ onlyUserId, groups = ["active", "upcoming", "submitted", "approved"], empty, adminActions }: { onlyUserId?: string; groups?: JobGroup[]; empty?: React.ReactNode; adminActions?: boolean }) {
   const inspections = useInspections();
   const customers = useCustomers();
   const facilities = useFacilities();
@@ -80,13 +81,18 @@ export function JobBoard({ onlyUserId, groups = ["active", "upcoming", "submitte
                     <div className="flex justify-between text-[11px] text-slate-500"><span>{c.eqDone} of {c.eqTotal} equipment</span><span>{c.roomsDone} of {c.roomsTotal} rooms finished</span></div>
                     <div className="mt-1 h-1.5 overflow-hidden rounded-full bg-slate-100"><div className="h-full rounded-full bg-thermal-500" style={{ width: `${pct}%` }} /></div>
                   </div>
-                  <div className="mt-4 flex gap-2">
+                  {adminActions ? (
+                    <div className="mt-4 grid gap-2">
+                      <DownloadExcelButton inspectionId={c.i.id} size="lg" className="h-12 w-full justify-center text-base" data-testid="card-download-xlsx" />
+                      <Link href={`/inspections/${c.i.id}/${c.group === "submitted" ? "review" : ""}`}><Button size="lg" className="h-11 w-full justify-center">{c.group === "submitted" ? "Review & Edit" : "Open"}</Button></Link>
+                    </div>
+                  ) : <div className="mt-4 flex gap-2">
                     {c.group === "active" || c.group === "upcoming" ? (
                       <Button variant="primary" size="lg" className="h-12 flex-1 justify-center text-base" onClick={() => begin(c.i.id)}><Play className="h-4 w-4" />{live || c.i.status === "In Progress" ? "Resume" : "Start"}</Button>
                     ) : (
                       <Link href={`/inspections/${c.i.id}/review`} className="flex-1"><Button size="lg" className="h-12 w-full justify-center">Open</Button></Link>
                     )}
-                  </div>
+                  </div>}
                 </div>
               );
             })}

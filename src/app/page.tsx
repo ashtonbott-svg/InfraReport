@@ -60,7 +60,7 @@ export default function DashboardPage() {
       {cloud ? (
         <Card className="mb-6">
           <CardHeader title="Jobs" description="Every inspection with its team and live room and equipment progress. Submitted jobs are your review queue." />
-          <CardBody><JobBoard empty={<p className="text-sm text-slate-500">No inspections yet. Create one with New Inspection and assign technicians.</p>} /></CardBody>
+          <CardBody><JobBoard adminActions empty={<p className="text-sm text-slate-500">No inspections yet. Create one with New Inspection and assign technicians.</p>} /></CardBody>
         </Card>
       ) : null}
 

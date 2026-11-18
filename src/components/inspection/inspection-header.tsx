@@ -14,6 +14,7 @@ import { toast } from "@/components/ui/toast";
 import { inspectorNames } from "@/components/forms/thermographer-picker";
 import { useRole } from "@/lib/cloud/role";
 import { SyncNotice } from "@/components/sync/sync-status";
+import { DownloadExcelButton } from "./download-excel";
 
 /** Statuses a technician may set. Approval and later stages are administrator-only (also enforced by the database). */
 const TECH_STATUSES: InspectionStatus[] = ["In Progress", "Needs Review"];
@@ -60,12 +61,15 @@ export function InspectionHeader({ inspection, errorCount }: { inspection: Inspe
             <StatusBadge status={inspection.status} />
           </div>
         </div>
+        <div className="flex flex-wrap items-center gap-3">
+        {isAdmin ? <DownloadExcelButton inspectionId={inspection.id} data-testid="header-download-xlsx" /> : null}
         <label className="flex items-center gap-2 text-xs font-medium text-slate-600">
           Status
           <Select className="h-8 w-44 text-xs" value={inspection.status} disabled={!isAdmin && !TECH_STATUSES.includes(inspection.status)} onChange={(e) => changeStatus(e.target.value as InspectionStatus)}>
             {statusOptions.map((s) => <option key={s} disabled={!isAdmin && !TECH_STATUSES.includes(s)}>{s}</option>)}
           </Select>
         </label>
+        </div>
       </div>
       <div className="mt-4"><SyncNotice inspectionId={inspection.id} /></div>
       <div className="flex gap-1 overflow-x-auto border-b border-slate-200">

@@ -237,31 +237,65 @@ const LEGACY = {
   await until("reconnected upload", async () => (await names(A.page)).includes("Panel P2"), 45000);
   ok("6b. connection restored: queued change uploaded automatically and appears on Ashton's phone");
 
-  // ---------------------------------------------------------------- 7. submit, approve, export
+  // ---------------------------------------------------------------- 7. finish without photos, admin review/edit, Excel before and after approval
+  const readWorkbook = async (dl) => {
+    const file = path.join(OUT || require("os").tmpdir(), `${Date.now()}-${dl.suggestedFilename()}`);
+    await dl.saveAs(file);
+    const { default: readXlsx } = await import(path.join(__dirname, "../node_modules/read-excel-file/universal/index.js"));
+    const sheets = await readXlsx(new Blob([require("fs").readFileSync(file)]));
+    const gen = sheets.find((x) => x.sheet === "Generator Import").data;
+    if (gen[0].length !== 16) throw new Error("export columns: " + gen[0].length);
+    if (!sheets.some((x) => x.sheet === "Equipment Summary") || !sheets.some((x) => x.sheet === "Column Map")) throw new Error("missing sheets: " + sheets.map((x) => x.sheet));
+    const col = (h) => gen[0].indexOf(h);
+    return gen.slice(1).map((r) => `${r[col("Location")]}|${r[col("Equipment")]}|${r[col("IR Image Number")]}`).sort();
+  };
+
+  // Technician: Exit -> Finish Site Visit, with no exterior, equipment or thermal photos at all.
+  await J.page.goto(BASE + `/inspections/${inspId}/entry`);
+  await J.page.getByRole("button", { name: "Exit", exact: true }).click();
+  await vis(J.page, "Leave this inspection?").waitFor();
+  await J.page.getByRole("button", { name: /Finish Site Visit/ }).click();
+  await until("Needs Review in DB", async () => (await sql("select status, submitted_by is not null as s from public.inspections where id = $1", [inspId]))[0].status === "Needs Review");
+  if ((await store(J.page)).photos.length !== 0) throw new Error("photos were required/saved");
   await J.page.goto(BASE + `/inspections/${inspId}/review`);
   if (await J.page.getByRole("button", { name: /Approve/ }).count()) throw new Error("technician sees Approve");
-  await J.page.getByRole("button", { name: "Submit for review" }).click();
-  await until("Needs Review in DB", async () => (await sql("select status from public.inspections where id = $1", [inspId]))[0].status === "Needs Review");
-  ok("7a. technician has no Approve button; Submit for review reached the database");
+  if (await J.page.getByTestId("header-download-xlsx").count()) throw new Error("technician sees admin download in header");
+  await shot(J.page, "07-tech-submitted");
+  ok("7a. technician finished the site visit with zero photos; inspection submitted for review (database stamped submitted_by); no Approve for technicians");
 
+  // Administrator: review queue card with a prominent Download Excel button.
+  await A.page.goto(BASE + "/");
+  await until("submitted card on dashboard", async () => (await A.page.getByText("Submitted for review").count()) > 0);
+  await shot(A.page, "08-admin-review-queue");
+
+  // Administrator edits a technician's reading after submission.
+  const st = await store(A.page);
+  const p1 = st.results.find((r) => r.inspectionId === inspId && st.equipment.find((e) => e.id === r.equipmentId)?.name === "Panel P1");
+  await A.page.goto(BASE + `/inspections/${inspId}/entry?room=${p1.locationId}`);
+  await A.page.locator(`button[data-result-id="${p1.id}"]`).click();
+  await A.page.locator("#ed-0-ir").fill("111");
+  await A.page.getByTestId("save-next").click();
+  await until("admin edit in DB", async () => (await sql("select ir_image_number from public.thermal_images where result_id = $1", [p1.id]))[0].ir_image_number === "111");
+  ok("7b. administrator edited the technician's Panel P1 reading (IR 101 -> 111) after submission; saved to the database");
+
+  // Download before approval from the dashboard card.
+  await A.page.goto(BASE + "/");
+  const card = A.page.getByTestId("job-card").filter({ hasText: "Canton Main" });
+  const [dl1] = await Promise.all([A.page.waitForEvent("download"), card.getByTestId("card-download-xlsx").click()]);
+  const rows1 = await readWorkbook(dl1);
+  const expected = ["Electrical Room|Panel P1|111", "Generator Room|Panel P2|102", "MCC Room|MCC-1|201"];
+  if (JSON.stringify(rows1) !== JSON.stringify(expected)) throw new Error("export before approval: " + JSON.stringify(rows1));
+  ok("7c. Download Excel (.xlsx) before approval: 16 columns, 3 sheets, every row from both phones incl. the admin edit");
+
+  // Approve, then download again from the inspection header.
   await A.page.goto(BASE + `/inspections/${inspId}/review`);
-  await until("admin sees submitted", async () => (await store(A.page)).inspections.find((i) => i.id === inspId)?.status === "Needs Review");
-  const [dl] = await Promise.all([A.page.waitForEvent("download"), A.page.getByTestId("export-xlsx").click()]);
-  const file = path.join(OUT || require("os").tmpdir(), dl.suggestedFilename());
-  await dl.saveAs(file);
-  const { default: readXlsx } = await import(path.join(__dirname, "../node_modules/read-excel-file/universal/index.js"));
-  const fs = require("fs");
-  const sheets = await readXlsx(new Blob([fs.readFileSync(file)]));
-  const gen = sheets.find((x) => x.sheet === "Generator Import").data;
-  const eqCol = gen[0].indexOf("Equipment");
-  const exported = gen.slice(1).map((r) => r[eqCol]).sort().join(",");
-  if (exported !== "MCC-1,Panel P1,Panel P2") throw new Error("combined export rows: " + exported);
-  if (gen[0].length !== 16) throw new Error("export columns: " + gen[0].length);
-  ok("7b. admin exported ONE combined workbook containing both phones' equipment (16 columns)");
-
   await A.page.getByRole("button", { name: /Approve/ }).click();
   await until("Approved in DB", async () => (await sql("select status, approved_by is not null as by from public.inspections where id = $1", [inspId]))[0].status === "Approved");
-  ok("7c. admin approved; database stamped approved_by");
+  const [dl2] = await Promise.all([A.page.waitForEvent("download"), A.page.getByTestId("header-download-xlsx").click()]);
+  const rows2 = await readWorkbook(dl2);
+  if (JSON.stringify(rows2) !== JSON.stringify(expected)) throw new Error("export after approval: " + JSON.stringify(rows2));
+  await shot(A.page, "09-admin-approved");
+  ok("7d. approved (database stamped approved_by); Download Excel (.xlsx) after approval gives the same complete workbook");
 
   // ---------------------------------------------------------------- 8. move legacy device data to the cloud
   await A.page.goto(BASE + "/settings");

@@ -164,9 +164,15 @@ export class SyncEngine {
     if (!due.length) return;
     this.setPhase("pushing");
     let networkDown = false;
-    for (const op0 of due) {
+    // A submission ("Needs Review") goes last, and only once everything else this phone
+    // recorded for that inspection is in the database, so an administrator never sees a
+    // submitted inspection that is still missing the technician's latest readings.
+    const isSubmission = (o: PendingOp) => o.table === "inspections" && o.kind === "upsert" && o.changed.includes("status") && o.row.status === "Needs Review";
+    const ordered = [...due.filter((o) => !isSubmission(o)), ...due.filter(isSubmission)];
+    for (const op0 of ordered) {
       const op = this.data.ops[op0.key];
       if (!op || op.failed || op.nextAttemptAt > this.now()) continue;
+      if (isSubmission(op) && this.hasUnsentWorkFor(op)) continue; // held; retried next cycle
       // Parents go first; when the network drops, stop and keep the order for the retry.
       if ((await this.pushOp(op)) === "network") { networkDown = true; break; }
     }
@@ -174,6 +180,14 @@ export class SyncEngine {
       this.offline = false;
       if (!Object.values(this.data.ops).some((o) => !o.failed)) this.save({ ...this.data, lastPushOkAt: this.now() });
     }
+  }
+
+  /** Any other queued (or failed) change on this phone for the inspection or its facility's rooms and equipment. */
+  hasUnsentWorkFor(submission: PendingOp): boolean {
+    const id = submission.id, fac = submission.row.facility_id;
+    return Object.values(this.data.ops).some((o) => o.key !== submission.key && (
+      o.row.inspection_id === id || (o.table === "inspection_assignments" && o.id.startsWith(`${id}|`)) ||
+      ((o.table === "locations" || o.table === "equipment") && o.row.facility_id === fac)));
   }
 
   private markSent(op: PendingOp) {

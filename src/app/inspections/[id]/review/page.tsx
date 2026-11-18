@@ -3,16 +3,14 @@
 import Link from "next/link";
 import { useParams, useRouter } from "next/navigation";
 import { useMemo, useState } from "react";
-import { AlertCircle, AlertTriangle, CheckCircle2, Download, FileSpreadsheet, Info, ShieldCheck } from "lucide-react";
-import { exportInspectionXlsx } from "@/lib/export-excel";
-import { inspectorNames } from "@/components/forms/thermographer-picker";
+import { AlertCircle, AlertTriangle, CheckCircle2, Download, Info, ShieldCheck } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Card, CardBody, CardHeader } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { EmptyState } from "@/components/ui/misc";
 import { InspectionHeader } from "@/components/inspection/inspection-header";
 import { toast } from "@/components/ui/toast";
-import { useCustomers, useFacilities, useInspectionBundle, useOrganization, useUsers } from "@/lib/store/hooks";
+import { useCustomers, useFacilities, useInspectionBundle, useOrganization } from "@/lib/store/hooks";
 import { useStore } from "@/lib/store/store";
 import { countBySeverity, type Severity } from "@/lib/domain/validation";
 import { GENERATOR_COLUMNS, GENERATOR_HEADERS, buildGeneratorRows, exportFileName, parseCsv, toCsv } from "@/lib/domain/csv";
@@ -21,8 +19,9 @@ import { cn } from "@/lib/cn";
 import { ExteriorCapture, useFieldState } from "@/components/field/exterior-photos";
 import { buildingLabel } from "@/lib/domain/site-visit";
 import { useRole } from "@/lib/cloud/role";
-import { syncNow, useSyncStatus } from "@/lib/sync/runtime";
+import { useSyncStatus } from "@/lib/sync/runtime";
 import { LastSynced } from "@/components/sync/sync-status";
+import { DownloadExcelButton, confirmSyncComplete } from "@/components/inspection/download-excel";
 
 const sevIcon: Record<Severity, React.ReactNode> = {
   error: <AlertCircle className="h-4 w-4 text-red-600" />,
@@ -37,33 +36,15 @@ export default function ReviewPage() {
   const org = useOrganization();
   const customers = useCustomers();
   const facilities = useFacilities();
-  const users = useUsers();
   const setStatus = useStore((s) => s.setInspectionStatus);
   const logEvent = useStore((s) => s.logEvent);
   const [show, setShow] = useState<Severity | "all">("all");
-  const [exporting, setExporting] = useState(false);
   const field = useFieldState(id);
   const { isAdmin, cloud } = useRole();
   const sync = useSyncStatus();
   const facilityId = bundle?.dataset.inspection.facilityId;
   const outstanding = useMemo(() => sync.ops.filter((o) => o.row.inspection_id === id || (o.table === "inspections" && o.id === id) || (facilityId && o.row.facility_id === facilityId)), [sync.ops, id, facilityId]);
   const syncIssues = outstanding.length + sync.conflictList.length;
-  /** Before exporting from a shared inspection, make sure the person knows what is not in the cloud yet. */
-  const confirmSyncState = async () => {
-    if (!sync.active) return true;
-    await syncNow()?.catch(() => undefined);
-    const st = useSyncStatus.getState();
-    const mine = st.ops.filter((o) => o.row.inspection_id === id || (o.table === "inspections" && o.id === id) || (facilityId && o.row.facility_id === facilityId));
-    if (!mine.length && !st.conflictList.length && !st.offline) return true;
-    const parts = [
-      mine.filter((o) => !o.failed).length ? `${mine.filter((o) => !o.failed).length} change(s) on this phone have not reached the cloud yet` : "",
-      mine.filter((o) => o.failed).length ? `${mine.filter((o) => o.failed).length} change(s) failed to sync` : "",
-      st.conflictList.length ? `${st.conflictList.length} conflict(s) still need a decision` : "",
-      st.offline ? "this phone is offline, so recent work from other phones may be missing" : "",
-    ].filter(Boolean);
-    return confirm(`Sync is not complete: ${parts.join("; ")}.\n\nThe file will contain what is on this phone right now. Export anyway?`);
-  };
-
   const rows = useMemo(() => (bundle ? buildGeneratorRows(bundle.dataset) : []), [bundle]);
   if (!bundle) return <EmptyState title="Inspection not found" action={<Link href="/inspections"><Button>Back</Button></Link>} />;
   const { dataset, issues } = bundle;
@@ -76,7 +57,7 @@ export default function ReviewPage() {
   const photoBlocked = !!field && !field.exit.allowed && inspection.siteVisit.state !== "completed" && (inspection.status === "Draft" || inspection.status === "In Progress");
 
   const exportCsv = async () => {
-    if (!(await confirmSyncState())) return;
+    if (!(await confirmSyncComplete(id))) return;
     const csv = toCsv(rows, { includeBom });
     // Self-check: re-parse and confirm the structure before handing the file over.
     const parsed = parseCsv(csv);
@@ -85,20 +66,6 @@ export default function ReviewPage() {
     downloadText(exportFileName(customer, facility, inspection.date), csv);
     logEvent(inspection.id, "Generator CSV exported", `${rows.length} rows, 16 columns${counts.error ? `, ${counts.error} unresolved errors` : ""}`);
     toast(`Exported ${rows.length} rows`);
-  };
-
-  const exportXlsx = async () => {
-    if (!(await confirmSyncState())) return;
-    setExporting(true);
-    try {
-      const n = await exportInspectionXlsx(dataset, { customer, facility, inspectionDate: inspection.date, thermographers: inspectorNames(inspection.inspectorIds, users) });
-      logEvent(inspection.id, "Excel workbook exported", `${n} Generator rows (one per thermal image), 16 columns${counts.error ? `, ${counts.error} unresolved errors` : ""}`);
-      toast(`Excel workbook exported: ${n} rows`);
-    } catch (e) {
-      toast(e instanceof Error ? `Excel export failed: ${e.message}` : "Excel export failed", "error");
-    } finally {
-      setExporting(false);
-    }
   };
 
   const jump = (resultId: string | null, locationId: string | null) => {
@@ -114,7 +81,7 @@ export default function ReviewPage() {
           <Card>
             <CardHeader title="Generator export" description={`Exact 16 column layout · ${rows.length} rows (one per thermal image) · Excel .xlsx with typed cells; CSV kept for compatibility`}
               actions={<>
-                <Button variant="primary" size="lg" onClick={exportXlsx} disabled={rows.length === 0 || exporting} data-testid="export-xlsx"><FileSpreadsheet className="h-4 w-4" />{exporting ? "Exporting…" : "Export to Excel"}</Button>
+                <DownloadExcelButton inspectionId={id} size="lg" disabled={rows.length === 0} data-testid="export-xlsx" />
                 <Button size="sm" variant="ghost" onClick={exportCsv} disabled={rows.length === 0}><Download className="h-3.5 w-3.5" />CSV (compatibility)</Button>
               </>} />
             <div className="max-h-[520px] overflow-auto">
