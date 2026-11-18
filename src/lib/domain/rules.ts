@@ -143,3 +143,7 @@ export function applySinglePhotoConvention(ir: string, visual: string): {
   if (!i && v) return { irImageNumber: v, visualImageNumber: v, visualFromSinglePhoto: true };
   return { irImageNumber: i, visualImageNumber: v, visualFromSinglePhoto: false };
 }
+
+/** Statuses in which an inspection's data is locked (approved). */
+export const LOCKED_STATUSES = ["Approved", "Report Generated", "Delivered"] as const;
+export const isLockedStatus = (status: string) => (LOCKED_STATUSES as readonly string[]).includes(status);

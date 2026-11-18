@@ -9,6 +9,7 @@ import { Card } from "@/components/ui/card";
 import { Input, Select } from "@/components/ui/field";
 import { EmptyState } from "@/components/ui/misc";
 import { InspectionHeader } from "@/components/inspection/inspection-header";
+import { ApprovalBanner } from "@/components/inspection/approval";
 import { RoomConditionsCard, RoomRail, type RoomEntry } from "@/components/inspection/room-panels";
 import { EquipmentGrid, QuickAddBar, type GridRow } from "@/components/inspection/equipment-grid";
 import { AddRoomSheet, RoomConditionsSheet, RoomPickerSheet, conditionSummary } from "@/components/field/room-sheets";
@@ -316,6 +317,7 @@ function EntryWorkspace() {
       <div className="mx-auto max-w-3xl pb-28">
         <div className={cn(isActive ? "hidden lg:block" : "")}><InspectionHeader inspection={inspection} errorCount={counts.error} /></div>
         <div className="space-y-3">
+          {isActive ? <div className="lg:hidden"><ApprovalBanner inspection={inspection} /></div> : null}
           {startBanner}
           {reminder}
 

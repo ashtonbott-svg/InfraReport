@@ -297,6 +297,43 @@ const LEGACY = {
   await shot(A.page, "09-admin-approved");
   ok("7d. approved (database stamped approved_by); Download Excel (.xlsx) after approval gives the same complete workbook");
 
+  // ---------------------------------------------------------------- 7e. approved = locked; reopen, tracked, approve again
+  await until("tech sees approved", async () => (await store(J.page)).inspections.find((i) => i.id === inspId)?.status === "Approved");
+  await J.page.goto(BASE + `/inspections/${inspId}/review`);
+  await J.page.getByTestId("approval-locked").waitFor();
+  if (await J.page.getByTestId("reopen").count()) throw new Error("technician offered Reopen");
+  const tst = await store(J.page);
+  const p2 = tst.results.find((r) => r.inspectionId === inspId && tst.equipment.find((e) => e.id === r.equipmentId)?.name === "Panel P2");
+  await J.page.goto(BASE + `/inspections/${inspId}/entry?room=${p2.locationId}`);
+  await J.page.locator(`button[data-result-id="${p2.id}"]`).click();
+  await J.page.locator("#ed-0-ir").fill("999");
+  await vis(J.page, "approved and locked").waitFor();
+  await shot(J.page, "10-tech-locked");
+  await J.page.goto(BASE + "/jobs");
+  if ((await store(J.page)).results.find((r) => r.id === p2.id).images[0].irImageNumber !== "102") throw new Error("locked edit was kept on the phone");
+  if ((await sql("select ir_image_number from public.thermal_images where result_id = $1", [p2.id]))[0].ir_image_number !== "102") throw new Error("locked edit reached the database");
+  ok("7e. approved inspection is locked: technician's edit refused with a message, nothing changed on the phone or in the database");
+
+  await A.page.goto(BASE + `/inspections/${inspId}/review`);
+  await A.page.getByTestId("reopen").click();
+  await A.page.getByTestId("approval-reopened").waitFor();
+  await until("reopened in DB", async () => (await sql("select status, reopen_count, approved_at from public.inspections where id = $1", [inspId]))[0].reopen_count === 1);
+  await until("tech sees reopened", async () => (await store(J.page)).inspections.find((i) => i.id === inspId)?.status === "In Progress");
+  await J.page.goto(BASE + `/inspections/${inspId}/entry?room=${p2.locationId}`);
+  await J.page.locator(`button[data-result-id="${p2.id}"]`).click();
+  await J.page.locator("#ed-0-ir").fill("103");
+  await J.page.getByTestId("save-next").click();
+  await until("correction in DB", async () => (await sql("select ir_image_number from public.thermal_images where result_id = $1", [p2.id]))[0].ir_image_number === "103");
+  await A.page.reload();
+  await until("change log shows correction", async () => /IR Image Number: 102 → 103/.test(await A.page.getByTestId("change-log").innerText().catch(() => "")));
+  await shot(A.page, "11-admin-changes-since-approval");
+  await A.page.getByRole("button", { name: /Approve again/ }).click();
+  await until("approved again", async () => (await sql("select status from public.inspections where id = $1", [inspId]))[0].status === "Approved");
+  const [dl3] = await Promise.all([A.page.waitForEvent("download"), A.page.getByTestId("header-download-xlsx").click()]);
+  const rows3 = await readWorkbook(dl3);
+  if (!rows3.includes("Generator Room|Panel P2|103")) throw new Error("export after re-approval: " + JSON.stringify(rows3));
+  ok("7f. admin reopened for corrections, technician corrected IR 102 -> 103, change shown in Changes since approval, approved again, Excel has the correction");
+
   // ---------------------------------------------------------------- 8. move legacy device data to the cloud
   await A.page.goto(BASE + "/settings");
   await A.page.getByRole("checkbox", { name: "Copy Legacy Customer" }).check();

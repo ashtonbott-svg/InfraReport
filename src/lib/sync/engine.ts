@@ -190,6 +190,19 @@ export class SyncEngine {
       ((o.table === "locations" || o.table === "equipment") && o.row.facility_id === fac)));
   }
 
+  /**
+   * Inspections carry values the database sets itself (approval and submission
+   * stamps, reopen count). Take them from the saved row right away; the version
+   * check would otherwise skip that row on the next pull.
+   */
+  private adoptServerFields(op: PendingOp, server: Row) {
+    if (op.table !== "inspections") return;
+    const merged: Row = { ...server };
+    const pending = this.data.ops[op.key];
+    if (pending?.kind === "upsert") for (const f of pending.changed) merged[f] = pending.row[f];
+    this.writeRows([{ table: "inspections", row: merged }]);
+  }
+
   private markSent(op: PendingOp) {
     if (op.sentOnce) return;
     this.save({ ...this.data, ops: { ...this.data.ops, [op.key]: { ...op, sentOnce: true } } });
@@ -201,7 +214,11 @@ export class SyncEngine {
     const transient = kind === "network" || kind === "auth" || kind === "parent_missing";
     const attempts = cur.attempts + 1;
     const permanent = !transient || (kind === "parent_missing" && attempts > 12);
-    const failed = permanent ? (kind === "denied" ? "Not allowed for your account" : message) : null;
+    const locked = /approved and locked/i.test(message);
+    const failed = permanent
+      ? (locked ? "Not saved: the inspection was approved and is locked. Ask an administrator to reopen it, then tap Retry, or Discard to keep the approved value."
+        : kind === "denied" ? "Not allowed for your account" : message)
+      : null;
     this.save({ ...this.data, ops: { ...this.data.ops, [op.key]: { ...cur, attempts, nextAttemptAt: this.now() + backoffMs(attempts), lastError: message, failed } } });
     if (kind === "network") { this.offline = true; this.lastError = "Offline. Changes are saved on this device and will upload automatically."; }
     else if (kind === "auth") { this.lastError = "Session expired. Sign in again to upload changes."; void this.d.sb.auth.refreshSession().catch(() => undefined); }
@@ -258,6 +275,7 @@ export class SyncEngine {
     const res = await this.d.sb.from(op.table).insert(sent).select().maybeSingle();
     if (!res.error && res.data) {
       this.save(settleOp(this.data, op.key, sent, res.data as Row, (res.data as Row).version as number));
+      this.adoptServerFields(op, res.data as Row);
       return "ok";
     }
     const kind = classify(res.error, res.status);
@@ -299,6 +317,7 @@ export class SyncEngine {
     const rows = (res.data ?? []) as Row[];
     if (rows.length) {
       this.save(settleOp(this.data, op.key, sent, rows[0], rows[0].version as number));
+      this.adoptServerFields(op, rows[0]);
       return "ok";
     }
     // Version moved (another device saved first) or the record is gone.

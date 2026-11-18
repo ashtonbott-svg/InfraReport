@@ -207,7 +207,9 @@ run("Supabase auth + Row Level Security (real database)", () => {
     expect((await justice.from("customers").delete().eq("id", ids.cust).select("id")).data ?? []).toEqual([]);
     expect((await ashton.from("customers").select("id").eq("id", ids.cust)).data).toHaveLength(1);
     expect((await ashton.from("inspections").update({ status: "Approved" }).eq("id", ids.insp).select("status, approved_by")).data).toEqual([{ status: "Approved", approved_by: ashtonId }]);
-    expect((await justice.from("thermal_images").update({ notes: "late edit" }).eq("id", ids.img).select("id")).data).toEqual([{ id: ids.img }]);
+    // Approved inspections are locked (migration 4): a technician's late edit is refused.
+    const late = await justice.from("thermal_images").update({ notes: "late edit" }).eq("id", ids.img).select("id");
+    expect(late.error?.message).toMatch(/approved and locked/);
   });
 
   it("another company's administrator sees none of it", async () => {

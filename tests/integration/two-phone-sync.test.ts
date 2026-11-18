@@ -341,6 +341,102 @@ run("Two phones on one inspection (real Supabase, real store, real sync)", () =>
     expect(row2).toMatchObject({ status: "Approved", approved_by: ashton.userId });
   });
 
+  it("approved: the phone refuses edits, and the database refuses them even if a phone sends one", async () => {
+    await justice.sync();
+    const insp = justice.s.inspections.find((i) => i.id === inspId)!;
+    expect(insp.status).toBe("Approved");
+    expect(insp.firstApprovedAt).toBeTruthy();
+    // The approving phone also has the database's approval stamps (not just the other phone).
+    expect(ashton.s.inspections.find((i) => i.id === inspId)!).toMatchObject({ status: "Approved" });
+    expect(ashton.s.inspections.find((i) => i.id === inspId)!.approvedAt).toBeTruthy();
+    const r = justice.s.results.find((x) => x.inspectionId === inspId)!;
+    const before = (await sql("select max_temp, version from public.thermal_images where id = $1", [r.images[0].id]))[0];
+    // The app itself refuses the edit on a locked inspection.
+    justice.s.updateThermalImage(r.id, r.images[0].id, { maxTemp: "999" });
+    expect(justice.s.results.find((x) => x.id === r.id)!.images[0].maxTemp).toBe(before.max_temp);
+    // A change that slips past the app (old app version, or edited offline before the approval arrived) is refused by the database.
+    justice.store.setState((s) => ({ results: s.results.map((x) => (x.id === r.id ? { ...x, images: x.images.map((im, i) => (i === 0 ? { ...im, maxTemp: "999" } : im)) } : x)) }));
+    await justice.sync();
+    const failed = Object.values(justice.engine.data.ops).filter((o) => o.failed);
+    expect(failed).toHaveLength(1);
+    expect(failed[0].failed).toMatch(/approved and is locked/);
+    expect((await sql("select max_temp, version from public.thermal_images where id = $1", [r.images[0].id]))[0]).toEqual(before);
+    // New rooms or equipment for the job are refused too.
+    const fac = justice.s.inspections.find((i) => i.id === inspId)!.facilityId;
+    const { error } = await justice.sb.from("locations").insert({ id: `loc-x-${uniq()}`, organization_id: org, facility_id: fac, name: "Sneaky Room" });
+    expect(error?.message).toMatch(/approved and locked/);
+    // Administrators are locked out too until they reopen.
+    const { error: adminErr } = await ashton.sb.from("thermal_images").update({ max_temp: "888" }).eq("id", r.images[0].id);
+    expect(adminErr?.message).toMatch(/approved and locked/);
+    // Discard brings back the approved value on the phone.
+    justice.engine.discardFailed(failed[0].key);
+    await justice.sync();
+    expect(justice.s.results.find((x) => x.id === r.id)!.images[0].maxTemp).toBe(before.max_temp);
+    expect(justice.engine.snapshot()).toMatchObject({ failed: 0, pending: 0 });
+  });
+
+  it("offline work from before the approval cannot silently change it; after a reopen it can be retried and is tracked", async () => {
+    // Reopen so Justice can work, then go offline and edit.
+    await ashton.sync();
+    expect(ashton.s.reopenInspection(inspId, "Missed panel")).toBe(true);
+    await ashton.sync();
+    await justice.sync();
+    const r = justice.s.results.find((x) => x.inspectionId === inspId)!;
+    justice.net.down = true;
+    justice.s.updateThermalImage(r.id, r.images[0].id, { notes: "late offline note" });
+    // Meanwhile the administrator approves again.
+    ashton.s.setInspectionStatus(inspId, "Approved");
+    await ashton.sync();
+    justice.net.down = false;
+    await justice.sync();
+    const failed = Object.values(justice.engine.data.ops).filter((o) => o.failed);
+    expect(failed.map((o) => o.table)).toEqual(["thermal_images"]);
+    expect((await sql("select notes from public.thermal_images where id = $1", [r.images[0].id]))[0].notes).not.toBe("late offline note");
+
+    // The administrator reopens for corrections: recorded, approval cleared.
+    await ashton.sync();
+    ashton.s.reopenInspection(inspId, "Add Justice's late note");
+    await ashton.sync();
+    const row = (await sql("select status, approved_at, first_approved_at, reopen_count, reopen_reason, reopened_by from public.inspections where id = $1", [inspId]))[0];
+    expect(row).toMatchObject({ status: "In Progress", approved_at: null, reopen_count: 2, reopen_reason: "Add Justice's late note", reopened_by: ashton.userId });
+    expect(row.first_approved_at).not.toBeNull();
+
+    // Justice retries: accepted now, and the change is in the change log.
+    justice.engine.retryFailed();
+    await justice.sync();
+    expect((await sql("select notes from public.thermal_images where id = $1", [r.images[0].id]))[0].notes).toBe("late offline note");
+    const log = await sql("select table_name, action, changes, changed_by from public.inspection_changes where inspection_id = $1 order by id", [inspId]);
+    expect(log.some((l) => l.table_name === "thermal_images" && l.changed_by === justice.userId && l.changes.notes?.[1] === "late offline note")).toBe(true);
+    expect(log.filter((l) => l.action === "reopened")).toHaveLength(2);
+    expect(log.some((l) => l.action === "approved")).toBe(true);
+    // Administrators can read the log through the app; technicians cannot.
+    const { data: adminLog } = await ashton.sb.from("inspection_changes").select("id").eq("inspection_id", inspId);
+    const { data: techLog } = await justice.sb.from("inspection_changes").select("id").eq("inspection_id", inspId);
+    expect(adminLog!.length).toBe(log.length);
+    expect(techLog).toEqual([]);
+
+    // Approval is required again; afterwards it is locked again.
+    await ashton.sync();
+    ashton.s.setInspectionStatus(inspId, "Approved");
+    await ashton.sync();
+    expect((await sql("select status, approved_by from public.inspections where id = $1", [inspId]))[0]).toEqual({ status: "Approved", approved_by: ashton.userId });
+    await justice.sync();
+    justice.s.updateThermalImage(r.id, r.images[0].id, { notes: "after" });
+    expect(justice.s.results.find((x) => x.id === r.id)!.images[0].notes).toBe("late offline note");
+  });
+
+  it("technicians cannot reopen or change the database-managed approval fields", async () => {
+    const { error } = await justice.sb.from("inspections").update({ status: "In Progress" }).eq("id", inspId);
+    expect(error?.message).toMatch(/approved and locked/);
+    const { error: e2 } = await ashton.sb.from("inspections").update({ notes: "edit while locked" }).eq("id", inspId);
+    expect(e2?.message).toMatch(/approved and locked/);
+    // Reopen count cannot be forged.
+    const v = (await sql("select reopen_count from public.inspections where id = $1", [inspId]))[0].reopen_count;
+    await ashton.sb.from("inspections").update({ reopen_count: 0, status: "Report Generated" }).eq("id", inspId);
+    expect((await sql("select status, reopen_count from public.inspections where id = $1", [inspId]))[0]).toEqual({ status: "Report Generated", reopen_count: v });
+    await ashton.sync();
+  });
+
   it("removing a technician from a job removes it from their phone", async () => {
     await justice.sync();
     expect(justice.s.inspections.some((i) => i.id === inspId)).toBe(true);

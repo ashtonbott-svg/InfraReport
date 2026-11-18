@@ -20,6 +20,7 @@ import {
 import {
   EMPTY_OVERRIDES,
   defaultComponentForType,
+  isLockedStatus,
   incrementName,
   normalizeNumericInput,
   resolveEquipmentType,
@@ -51,6 +52,20 @@ import { checkRoom, newThermalImage, patchThermalImage } from "../domain/thermal
 import { trackedLocalStorage } from "./save-status";
 
 export const SCHEMA_VERSION = 4;
+
+/** Called when someone tries to change a locked (approved) shared inspection. The app shows a message. */
+let lockedEditListener: ((inspection: Inspection) => void) | null = null;
+export function onLockedEdit(fn: ((inspection: Inspection) => void) | null) { lockedEditListener = fn; }
+
+/**
+ * Shared (cloud) inspections in Approved / Report Generated / Delivered are
+ * read only on every device until an administrator reopens them. The database
+ * enforces the same rule; this keeps the phone from accepting edits it could
+ * never upload. Device-only inspections behave exactly as before.
+ */
+export function isInspectionLocked(i: Pick<Inspection, "organizationId" | "status"> | undefined): boolean {
+  return !!i && i.organizationId !== DEMO_ORG_ID && isLockedStatus(i.status);
+}
 
 export interface DataState {
   schemaVersion: number;
@@ -114,6 +129,8 @@ export interface Actions {
   updateInspection(id: ID, patch: Partial<Inspection>): void;
   /** Returns false (and changes nothing) when the transition is blocked. */
   setInspectionStatus(id: ID, status: InspectionStatus, detail?: string): boolean;
+  /** Administrator: unlock an approved shared inspection for corrections. It must be approved again. */
+  reopenInspection(id: ID, reason: string): boolean;
   exitCheck(inspectionId: ID): ExitCheck;
   startSiteVisit(inspectionId: ID): void;
   pauseSiteVisit(inspectionId: ID): ExitCheck;
@@ -193,6 +210,14 @@ export const storeInitializer: StateCreator<Store> = (set, get) => {
       const org = () => get().currentOrgId;
       const touch = (inspectionId: ID) =>
         set((s) => ({ inspections: s.inspections.map((i) => (i.id === inspectionId ? { ...i, updatedAt: now() } : i)) }));
+      const lockedInsp = (inspectionId: ID | undefined) => {
+        const i = inspectionId ? get().inspections.find((x) => x.id === inspectionId) : undefined;
+        const locked = isInspectionLocked(i);
+        if (locked) lockedEditListener?.(i!);
+        return locked;
+      };
+      const lockedResult = (resultId: ID) => lockedInsp(get().results.find((r) => r.id === resultId)?.inspectionId);
+      const lockedRoom = (roomId: ID) => lockedInsp(get().rooms.find((r) => r.id === roomId)?.inspectionId);
       const nextResultOrder = (inspectionId: ID) =>
         Math.max(0, ...get().results.filter((r) => r.inspectionId === inspectionId).map((r) => r.sortOrder)) + 1;
 
@@ -301,6 +326,7 @@ export const storeInitializer: StateCreator<Store> = (set, get) => {
           return id;
         },
         updateInspection(id, patch) {
+          if (Object.keys(patch).some((k) => k !== "inspectorIds") && lockedInsp(id)) return;
           set((s) => ({ inspections: s.inspections.map((i) => (i.id === id ? { ...i, ...normalizePatch(patch), id, updatedAt: now() } : i)) }));
         },
         setInspectionStatus(id, status, detail) {
@@ -317,6 +343,14 @@ export const storeInitializer: StateCreator<Store> = (set, get) => {
           return true;
         },
 
+        reopenInspection(id, reason) {
+          const insp = get().inspections.find((i) => i.id === id);
+          if (!insp || !isLockedStatus(insp.status)) return false;
+          const why = reason.trim();
+          set((s) => ({ inspections: s.inspections.map((i) => (i.id === id ? { ...i, status: "In Progress", reopenReason: why, updatedAt: now() } : i)) }));
+          get().logEvent(id, "Reopened for corrections", `${insp.status} → In Progress${why ? `: ${why}` : ""}. Approval required again.`);
+          return true;
+        },
         exitCheck(inspectionId) {
           const s = get();
           const rooms = s.rooms.filter((r) => r.inspectionId === inspectionId);
@@ -398,6 +432,7 @@ export const storeInitializer: StateCreator<Store> = (set, get) => {
         },
 
         addRoomToInspection(inspectionId, locationId) {
+          if (lockedInsp(inspectionId)) return "";
           const existing = get().rooms.find((r) => r.inspectionId === inspectionId && r.locationId === locationId);
           if (existing) return existing.id;
           const id = uid("rc");
@@ -405,6 +440,7 @@ export const storeInitializer: StateCreator<Store> = (set, get) => {
           return id;
         },
         createRoomForInspection(inspectionId, room, conditions) {
+          if (lockedInsp(inspectionId)) return "";
           const insp = get().inspections.find((i) => i.id === inspectionId);
           if (!insp) return "";
           const locationId = get().createLocation({ facilityId: insp.facilityId, ...room });
@@ -414,6 +450,7 @@ export const storeInitializer: StateCreator<Store> = (set, get) => {
           return locationId;
         },
         updateRoomConditions(id, patch) {
+          if (lockedRoom(id)) return;
           // Editing a measured value here means the conditions are no longer "copied".
           const touches = ["humidity", "ambientTemp", "backgroundTemp"].some((k) => k in patch);
           set((s) => ({
@@ -424,11 +461,13 @@ export const storeInitializer: StateCreator<Store> = (set, get) => {
           }));
         },
         confirmRoomConditions(roomId) {
+          if (lockedRoom(roomId)) return;
           set((s) => ({ rooms: s.rooms.map((r) => (r.id === roomId ? { ...r, conditionsCopiedFrom: null } : r)) }));
           const r = get().rooms.find((x) => x.id === roomId);
           if (r) get().logEvent(r.inspectionId, "Room conditions confirmed", "Copied conditions confirmed as measured in this room");
         },
         finishRoom(roomId) {
+          if (lockedRoom(roomId)) return false;
           const s = get();
           const room = s.rooms.find((r) => r.id === roomId);
           if (!room) return false;
@@ -441,15 +480,18 @@ export const storeInitializer: StateCreator<Store> = (set, get) => {
           return true;
         },
         reopenRoom(roomId) {
+          if (lockedRoom(roomId)) return;
           set((s) => ({ rooms: s.rooms.map((r) => (r.id === roomId ? { ...r, completedAt: null } : r)) }));
         },
         removeRoomFromInspection(inspectionId, locationId) {
+          if (lockedInsp(inspectionId)) return false;
           if (get().results.some((r) => r.inspectionId === inspectionId && r.locationId === locationId)) return false;
           set((s) => ({ rooms: s.rooms.filter((r) => !(r.inspectionId === inspectionId && r.locationId === locationId)) }));
           return true;
         },
 
         addResult(inspectionId, locationId, row) {
+          if (lockedInsp(inspectionId)) return "";
           const insp = get().inspections.find((i) => i.id === inspectionId);
           if (!insp) return "";
           const type = resolveEquipmentType(row.equipmentType, row.name);
@@ -480,6 +522,7 @@ export const storeInitializer: StateCreator<Store> = (set, get) => {
           return id;
         },
         addExistingEquipment(inspectionId, equipmentId) {
+          if (lockedInsp(inspectionId)) return "";
           const e = get().equipment.find((x) => x.id === equipmentId);
           if (!e) return "";
           get().addRoomToInspection(inspectionId, e.locationId);
@@ -497,12 +540,14 @@ export const storeInitializer: StateCreator<Store> = (set, get) => {
           return id;
         },
         updateResult(id, patch) {
+          if (lockedResult(id)) return;
           const r = get().results.find((x) => x.id === id);
           if (!r) return;
           set((s) => ({ results: s.results.map((x) => (x.id === id ? { ...x, ...normalizePatch(patch), id, updatedAt: now() } : x)) }));
           touch(r.inspectionId);
         },
         setOverride(id, key, value) {
+          if (lockedResult(id)) return;
           const r = get().results.find((x) => x.id === id);
           if (!r) return;
           const v = value === null ? null : key === "imageDate" ? value : normalizeNumericInput(value);
@@ -510,6 +555,7 @@ export const storeInitializer: StateCreator<Store> = (set, get) => {
           touch(r.inspectionId);
         },
         duplicateResult(id) {
+          if (lockedResult(id)) return null;
           const s = get();
           const r = s.results.find((x) => x.id === id);
           const e = r && s.equipment.find((x) => x.id === r.equipmentId);
@@ -536,6 +582,7 @@ export const storeInitializer: StateCreator<Store> = (set, get) => {
           return newId;
         },
         addThermalImage(resultId, partial) {
+          if (lockedResult(resultId)) return "";
           const r = get().results.find((x) => x.id === resultId);
           if (!r) return "";
           const img = newThermalImage(partial ?? {});
@@ -544,6 +591,7 @@ export const storeInitializer: StateCreator<Store> = (set, get) => {
           return img.id;
         },
         updateThermalImage(resultId, imageId, patch) {
+          if (lockedResult(resultId)) return;
           const r = get().results.find((x) => x.id === resultId);
           if (!r) return;
           set((s) => ({
@@ -557,6 +605,7 @@ export const storeInitializer: StateCreator<Store> = (set, get) => {
           touch(r.inspectionId);
         },
         removeThermalImage(resultId, imageId) {
+          if (lockedResult(resultId)) return;
           const r = get().results.find((x) => x.id === resultId);
           if (!r) return;
           set((s) => ({
@@ -571,12 +620,14 @@ export const storeInitializer: StateCreator<Store> = (set, get) => {
           touch(r.inspectionId);
         },
         setException(resultId, exception) {
+          if (lockedResult(resultId)) return;
           const r = get().results.find((x) => x.id === resultId);
           if (!r) return;
           set((s) => ({ results: s.results.map((x) => (x.id === resultId ? { ...x, exception: exception ? { ...exception, at: now() } : null, updatedAt: now() } : x)) }));
           touch(r.inspectionId);
         },
         deleteResult(id) {
+          if (lockedResult(id)) return;
           const r = get().results.find((x) => x.id === id);
           if (!r) return;
           // Remove the inspection row. If the equipment was created in this

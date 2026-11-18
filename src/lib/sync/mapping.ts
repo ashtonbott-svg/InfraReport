@@ -44,7 +44,7 @@ export function equipmentRow(e: Equipment): Row {
   return { id: e.id, organization_id: e.organizationId, facility_id: e.facilityId, location_id: e.locationId, name: e.name, equipment_type: e.equipmentType, default_component: e.defaultComponent, identifiers: S(e.identifiers), imported_from: S(e.importedFrom), active: e.active, sort_order: e.sortOrder };
 }
 export function inspectionRow(i: Inspection): Row {
-  return { id: i.id, organization_id: i.organizationId, customer_id: i.customerId, facility_id: i.facilityId, date: i.date, status: i.status, default_emissivity: i.defaultEmissivity, notes: i.notes };
+  return { id: i.id, organization_id: i.organizationId, customer_id: i.customerId, facility_id: i.facilityId, date: i.date, status: i.status, default_emissivity: i.defaultEmissivity, notes: i.notes, reopen_reason: i.reopenReason ?? "" };
 }
 export function roomRow(r: InspectionRoomConditions): Row {
   return { id: r.id, organization_id: r.organizationId, inspection_id: r.inspectionId, location_id: r.locationId, humidity: r.humidity, ambient_temp: r.ambientTemp, background_temp: r.backgroundTemp, image_date: r.imageDate, conditions_copied_from: r.conditionsCopiedFrom ?? null, completed_at: r.completedAt ?? null };
@@ -104,6 +104,9 @@ export function toInspection(r: Row, existing?: Inspection): Inspection {
     inspectorIds: existing?.inspectorIds ?? [], status: S(r.status) as Inspection["status"], defaultEmissivity: S(r.default_emissivity) || "0.95",
     notes: S(r.notes), createdAt: S(r.created_at), updatedAt: S(r.updated_at),
     siteVisit: existing?.siteVisit ?? newSiteVisit(), // device-local
+    submittedAt: (r.submitted_at as string | null) ?? null, approvedAt: (r.approved_at as string | null) ?? null,
+    firstApprovedAt: (r.first_approved_at as string | null) ?? null, reopenedAt: (r.reopened_at as string | null) ?? null,
+    reopenCount: num(r.reopen_count), reopenReason: S(r.reopen_reason),
   };
 }
 export function toRoom(r: Row): InspectionRoomConditions {
@@ -125,7 +128,8 @@ export function toEvent(r: Row): ReviewEvent {
 }
 
 /** Columns that the database owns; never sent by clients. */
-export const SERVER_COLUMNS = new Set(["version", "created_at", "created_by", "updated_at", "updated_by", "deleted_at", "submitted_at", "submitted_by", "approved_at", "approved_by"]);
+export const SERVER_COLUMNS = new Set(["version", "created_at", "created_by", "updated_at", "updated_by", "deleted_at", "submitted_at", "submitted_by", "approved_at", "approved_by",
+  "first_approved_at", "reopened_at", "reopened_by", "reopen_count"]);
 
 /** Natural keys: a second phone creating "the same" row gets folded into the existing one. */
 export const NATURAL_KEYS: Partial<Record<TableName, string[]>> = {

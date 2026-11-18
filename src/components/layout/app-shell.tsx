@@ -8,10 +8,10 @@ import {
 } from "lucide-react";
 import { cn } from "@/lib/cn";
 import { useHydrateStore, useOrganization, useUsers } from "@/lib/store/hooks";
-import { useStore } from "@/lib/store/store";
+import { onLockedEdit, useStore } from "@/lib/store/store";
 import { useFieldUi } from "@/lib/store/field-ui";
 import { Wordmark } from "./logo";
-import { Toaster } from "@/components/ui/toast";
+import { Toaster, toast } from "@/components/ui/toast";
 import { Button } from "@/components/ui/button";
 import { SaveIndicator } from "@/components/field/save-indicator";
 import { ExitCheckpoint, ExteriorPhotoSheet, useFieldState, type FieldState } from "@/components/field/exterior-photos";
@@ -245,6 +245,17 @@ export function AppShell({ children }: { children: ReactNode }) {
   useEffect(() => {
     if (ready && activeId && !field) useStore.setState({ activeInspectionId: null });
   }, [ready, activeId, field]);
+
+  // A change attempted on an approved (locked) shared inspection is refused: say so, once per few seconds.
+  useEffect(() => {
+    let last = 0;
+    onLockedEdit(() => {
+      if (Date.now() - last < 4000) return;
+      last = Date.now();
+      toast("This inspection is approved and locked. An administrator can reopen it for corrections.", "error");
+    });
+    return () => onLockedEdit(null);
+  }, []);
 
   if (gate.onAuthPage) return <>{ready ? children : null}<Toaster /></>;
 

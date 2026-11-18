@@ -15,6 +15,7 @@ import { inspectorNames } from "@/components/forms/thermographer-picker";
 import { useRole } from "@/lib/cloud/role";
 import { SyncNotice } from "@/components/sync/sync-status";
 import { DownloadExcelButton } from "./download-excel";
+import { ApprovalBanner } from "./approval";
 
 /** Statuses a technician may set. Approval and later stages are administrator-only (also enforced by the database). */
 const TECH_STATUSES: InspectionStatus[] = ["In Progress", "Needs Review"];
@@ -71,7 +72,7 @@ export function InspectionHeader({ inspection, errorCount }: { inspection: Inspe
         </label>
         </div>
       </div>
-      <div className="mt-4"><SyncNotice inspectionId={inspection.id} /></div>
+      <div className="mt-4"><ApprovalBanner inspection={inspection} /><SyncNotice inspectionId={inspection.id} /></div>
       <div className="flex gap-1 overflow-x-auto border-b border-slate-200">
         {tabs.map((t) => (
           <Link key={t.href} href={t.href}

@@ -8,8 +8,30 @@ This branch (`collaborative-v2`) adds shared cloud inspections. Production (`mai
 2. Paste the whole contents of `supabase/migrations/20261118000100_collaborative_core.sql` and press **Run**. It should finish with "Success. No rows returned".
 3. New query. Paste `supabase/migrations/20261118000200_admin_bootstrap.sql`, press **Run**.
 4. New query. Paste `supabase/migrations/20261118000300_event_received_at.sql`, press **Run**.
+5. New query. Paste `supabase/migrations/20261118000400_approval_lock.sql`, press **Run** (see Migration 4 below).
 
 Run them once each, in that order. Running the first file a second time fails on purpose (the tables already exist) and changes nothing.
+
+### Migration 4: approved inspections are locked (added later)
+
+If you already ran migrations 1 to 3, run only this one:
+
+1. Open https://supabase.com/dashboard/project/yuoqdyrhhchfdapyqxdz/sql/new
+2. Paste the whole contents of `supabase/migrations/20261118000400_approval_lock.sql` and press **Run**. Expect "Success. No rows returned".
+3. Check it, in a new query:
+   ```sql
+   select count(*) as lock_triggers from pg_trigger where tgname = 'approval_lock';
+   ```
+   The answer must be **5**.
+
+Run it once. A second run stops with "trigger approval_lock already exists" and changes nothing. Existing data is kept; inspections that are already approved become locked.
+
+What it does:
+* Approved, Report Generated and Delivered inspections are read only for everyone, administrators included, until an administrator reopens them (Review page or inspection header: **Reopen for corrections**).
+* Reopening records who, when, the reason and the count, clears the approval, and sets the inspection to In Progress so assigned technicians can correct it. It must be approved again.
+* Every change after the first approval is logged in `inspection_changes` (administrators only; shown as **Changes since approval** on the Review page).
+* A phone that edited offline before the approval cannot change the approved data: its upload is refused and listed on that phone's Sync page with **Retry** (after a reopen) or **Discard**.
+* Download Excel works in every status.
 
 ## 2. Make ashton@infiniteinfrared.com the administrator (one time)
 

@@ -11,7 +11,7 @@ import { EmptyState } from "@/components/ui/misc";
 import { InspectionHeader } from "@/components/inspection/inspection-header";
 import { toast } from "@/components/ui/toast";
 import { useCustomers, useFacilities, useInspectionBundle, useOrganization } from "@/lib/store/hooks";
-import { useStore } from "@/lib/store/store";
+import { isInspectionLocked, useStore } from "@/lib/store/store";
 import { countBySeverity, type Severity } from "@/lib/domain/validation";
 import { GENERATOR_COLUMNS, GENERATOR_HEADERS, buildGeneratorRows, exportFileName, parseCsv, toCsv } from "@/lib/domain/csv";
 import { downloadText } from "@/lib/download";
@@ -22,6 +22,7 @@ import { useRole } from "@/lib/cloud/role";
 import { useSyncStatus } from "@/lib/sync/runtime";
 import { LastSynced } from "@/components/sync/sync-status";
 import { DownloadExcelButton, confirmSyncComplete } from "@/components/inspection/download-excel";
+import { ChangesSinceApproval } from "@/components/inspection/approval";
 
 const sevIcon: Record<Severity, React.ReactNode> = {
   error: <AlertCircle className="h-4 w-4 text-red-600" />,
@@ -138,15 +139,17 @@ export default function ReviewPage() {
                 </div>
               ) : null}
               <div className="flex flex-wrap gap-2">
-                <Button disabled={inspection.status === "Needs Review" || photoBlocked} onClick={() => { if (setStatus(inspection.id, "Needs Review")) toast("Sent for review"); else toast("Building exterior photo required before review", "error"); }}>Submit for review</Button>
-                {isAdmin ? <Button variant="primary" disabled={counts.error > 0 || photoBlocked || inspection.status === "Approved"} onClick={() => { if (setStatus(inspection.id, "Approved", `${counts.warning} warnings acknowledged`)) toast("Inspection approved"); else toast("Building exterior photo required before approval", "error"); }}>
-                  <CheckCircle2 className="h-4 w-4" />Approve
+                <Button disabled={inspection.status === "Needs Review" || photoBlocked || isInspectionLocked(inspection)} onClick={() => { if (setStatus(inspection.id, "Needs Review")) toast("Sent for review"); else toast("Building exterior photo required before review", "error"); }}>Submit for review</Button>
+                {isAdmin ? <Button variant="primary" disabled={counts.error > 0 || photoBlocked || isInspectionLocked(inspection) || inspection.status === "Approved"} onClick={() => { if (setStatus(inspection.id, "Approved", `${counts.warning} warnings acknowledged`)) toast("Inspection approved"); else toast("Building exterior photo required before approval", "error"); }}>
+                  <CheckCircle2 className="h-4 w-4" />{inspection.firstApprovedAt ? "Approve again" : "Approve"}
                 </Button> : null}
               </div>
               {!isAdmin ? <p className="text-xs text-slate-500">After you submit, an administrator reviews and approves the inspection.</p> : null}
               <p className="text-xs text-slate-500">Finished PDF report generation is not connected yet. It will be enabled only after your existing Generator is integrated and verified.</p>
             </CardBody>
           </Card>
+
+          <ChangesSinceApproval inspection={inspection} />
 
           <Card>
             <CardHeader title="Validation" description="Nothing is changed automatically. Fix items in Equipment Entry." />

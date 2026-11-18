@@ -126,6 +126,14 @@ export interface Inspection {
   updatedAt: ISODateTime;
   /** Field workflow state. Separate from the review status above. */
   siteVisit: SiteVisit;
+  /** Shared (cloud) inspections only, maintained by the database. */
+  submittedAt?: ISODateTime | null;
+  approvedAt?: ISODateTime | null;
+  firstApprovedAt?: ISODateTime | null;
+  reopenedAt?: ISODateTime | null;
+  reopenCount?: number;
+  /** Why an administrator reopened an approved inspection. */
+  reopenReason?: string;
 }
 
 export type SiteVisitState = "not-started" | "active" | "paused" | "completed";
