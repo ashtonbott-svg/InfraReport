@@ -5,7 +5,7 @@
  */
 import { createClient } from "@supabase/supabase-js";
 import { NextResponse } from "next/server";
-import { ConfigError, serverEnv } from "./env";
+import { ConfigError, deploymentInfo, serverEnv } from "./env";
 import { AuthError, type AuthDeps } from "./tech-auth";
 
 const noPersist = { auth: { persistSession: false, autoRefreshToken: false, detectSessionInUrl: false } };
@@ -35,10 +35,18 @@ export function clientIp(req: Request): string {
 
 /** Uniform JSON errors; internal details are logged, not returned. */
 export function errorResponse(e: unknown) {
-  if (e instanceof AuthError) return NextResponse.json({ error: e.message, code: e.code }, { status: e.status });
-  if (e instanceof ConfigError) return NextResponse.json({ error: "The server is not configured for cloud sign-in yet.", code: "not_configured" }, { status: 503 });
+  if (e instanceof AuthError) return NextResponse.json({ error: e.message, code: e.code }, { status: e.status, headers: { "cache-control": "no-store" } });
+  if (e instanceof ConfigError) {
+    // Setting names and reasons only (never values), plus which deployment answered.
+    const d = deploymentInfo();
+    console.error("InfraReport configuration problem:", e.problems.join("; "), d);
+    return NextResponse.json({
+      error: `The server is not configured for cloud sign-in yet: ${e.problems.join("; ")}. (Deployment ${d.commit ?? d.deployment}. Details at /api/health.)`,
+      code: "not_configured", problems: e.problems, ...d,
+    }, { status: 503, headers: { "cache-control": "no-store" } });
+  }
   console.error(e);
-  return NextResponse.json({ error: "Something went wrong on the server.", code: "server_error" }, { status: 500 });
+  return NextResponse.json({ error: "Something went wrong on the server.", code: "server_error" }, { status: 500, headers: { "cache-control": "no-store" } });
 }
 
 export async function readJson<T>(req: Request): Promise<T> {
