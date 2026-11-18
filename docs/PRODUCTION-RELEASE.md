@@ -2,6 +2,9 @@
 
 Work through these in order. Each step says how to check it. Nothing here touches any project other than the Vercel project **infrareport**, the GitHub repository **ashtonbott-svg/InfraReport** and the Supabase project **yuoqdyrhhchfdapyqxdz**.
 
+> Status 2026-11-18: migration 5 applied and verified through the Management API; history reconciled (see
+> `supabase/MIGRATIONS.md`). Future migrations: `scripts/supabase-migrate.sh`.
+
 ## Step 1. Apply migration 5 to the hosted database
 
 Migrations 1 to 4 are already applied. Apply only migration 5.
