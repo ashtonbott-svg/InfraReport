@@ -18,7 +18,12 @@ import { ExitCheckpoint, ExteriorPhotoSheet, useFieldState, type FieldState } fr
 import { requestPersistentStorage } from "@/lib/photos/photo-db";
 import { locationLabel } from "@/lib/domain/csv";
 import { useOnline } from "@/lib/use-online";
-import { CloudOff } from "lucide-react";
+import { CloudOff, HardHat, Briefcase, UserCog, RefreshCw } from "lucide-react";
+import { cloudConfigured } from "@/lib/cloud/client";
+import { signOut, startSession, useSession } from "@/lib/cloud/session";
+import { fieldRouteAllowed, useRole } from "@/lib/cloud/role";
+import { hasUnsyncedWork, startSync, stopSync } from "@/lib/sync/runtime";
+import { SyncBadge } from "@/components/sync/sync-status";
 
 const NAV = [
   { href: "/", label: "Dashboard", icon: LayoutDashboard },
@@ -34,12 +39,24 @@ const linkCls = (active: boolean) =>
   cn("group flex items-center gap-3 rounded-md px-3 py-2.5 text-sm font-medium transition-colors",
     active ? "bg-white/10 text-white" : "text-slate-400 hover:bg-white/5 hover:text-slate-100");
 
+const CLOUD_ADMIN_NAV = [
+  { href: "/jobs", label: "My Jobs", icon: Briefcase },
+  { href: "/technicians", label: "Technicians", icon: UserCog },
+  { href: "/sync", label: "Sync", icon: RefreshCw },
+];
+const FIELD_NAV = [
+  { href: "/jobs", label: "My Jobs", icon: Briefcase },
+  { href: "/sync", label: "Sync", icon: RefreshCw },
+];
+
 function NavLinks({ onNavigate }: { onNavigate?: () => void }) {
   const pathname = usePathname();
+  const { cloud, adminView } = useRole();
   const isActive = (href: string) => (href === "/" ? pathname === "/" : pathname.startsWith(href));
+  const items: { href: string; label: string; icon: typeof Users; preview?: boolean }[] = !cloud ? NAV : adminView ? [...NAV.slice(0, 4), ...CLOUD_ADMIN_NAV, ...NAV.slice(4)] : FIELD_NAV;
   return (
     <nav className="flex flex-1 flex-col gap-0.5 overflow-y-auto px-3">
-      {NAV.map(({ href, label, icon: Icon, preview }) => (
+      {items.map(({ href, label, icon: Icon, preview }) => (
         <Link key={href} href={href} onClick={onNavigate} className={linkCls(isActive(href))}>
           <Icon className={cn("h-4 w-4", isActive(href) ? "text-thermal-400" : "text-slate-500 group-hover:text-slate-300")} />
           <span className="flex-1">{label}</span>
@@ -105,9 +122,25 @@ function SidebarFooter() {
   const users = useUsers();
   const currentUserId = useStore((s) => s.currentUserId);
   const user = users.find((u) => u.id === currentUserId);
+  const { cloud, isAdmin, adminView } = useRole();
+  const setView = useSession((s) => s.setView);
+  const router = useRouter();
+  const doSignOut = async () => {
+    if (hasUnsyncedWork() && !confirm("Some changes have not reached the cloud yet. They stay on this phone and upload the next time you sign in here as the same person. Sign out anyway?")) return;
+    stopSync();
+    await signOut();
+    router.replace("/login");
+  };
   return (
     <div className="border-t border-white/5 p-4">
-      <SaveIndicator dark className="mb-3" />
+      <SaveIndicator dark className="mb-2" />
+      <SyncBadge className="mb-3" />
+      {cloud && isAdmin ? (
+        <div className="mb-3 grid grid-cols-2 gap-1 rounded-md bg-white/5 p-1 text-xs" role="group" aria-label="Mode">
+          <button onClick={() => { setView("admin"); router.push("/"); }} className={cn("rounded px-2 py-1.5", adminView ? "bg-white/15 text-white" : "text-slate-400")}>Admin</button>
+          <button onClick={() => { setView("field"); router.push("/jobs"); }} className={cn("flex items-center justify-center gap-1 rounded px-2 py-1.5", !adminView ? "bg-white/15 text-white" : "text-slate-400")}><HardHat className="h-3 w-3" />Field</button>
+        </div>
+      ) : null}
       <div className="flex items-center gap-3">
         <div className="flex h-8 w-8 items-center justify-center rounded-full bg-slate-700 text-xs font-semibold text-slate-200">
           {user?.name.split(" ").map((p) => p[0]).join("") ?? "?"}
@@ -117,6 +150,7 @@ function SidebarFooter() {
           <div className="truncate text-slate-500">{org?.name}</div>
         </div>
       </div>
+      {cloud ? <button onClick={() => void doSignOut()} className="mt-3 flex items-center gap-2 text-xs text-slate-400 hover:text-slate-200"><LogOut className="h-3.5 w-3.5" />Sign out</button> : null}
     </div>
   );
 }
@@ -162,8 +196,35 @@ function FieldOverlays({ field }: { field: FieldState }) {
   );
 }
 
+const AUTH_PAGES = ["/login", "/activate"];
+
+/** Cloud mode: hydrate the device store, resolve the session, start sync, and keep people on screens their role allows. */
+function useCloudGate(ready: boolean) {
+  const pathname = usePathname();
+  const router = useRouter();
+  const status = useSession((s) => s.status);
+  const me = useSession((s) => s.me);
+  const { adminView } = useRole();
+  useEffect(() => { if (ready) void startSession(); }, [ready]);
+  useEffect(() => {
+    if (status === "signedIn" && me) startSync(me.userId, me.organizationId);
+    if (status === "signedOut") stopSync();
+  }, [status, me]);
+  const onAuthPage = AUTH_PAGES.includes(pathname);
+  const blocked = cloudConfigured && status === "signedIn" && !adminView && !fieldRouteAllowed(pathname) && !onAuthPage;
+  useEffect(() => {
+    if (!cloudConfigured || !ready) return;
+    if (status === "signedOut" && !onAuthPage) router.replace("/login");
+    else if (blocked) router.replace("/jobs");
+  }, [status, onAuthPage, blocked, ready, router]);
+  const waiting = cloudConfigured && !onAuthPage && (status === "loading" || status === "signedOut" || blocked);
+  return { onAuthPage, waiting };
+}
+
 export function AppShell({ children }: { children: ReactNode }) {
   const ready = useHydrateStore();
+  const gate = useCloudGate(ready);
+  const { cloud, adminView } = useRole();
   const [open, setOpen] = useState(false);
   const pathname = usePathname();
   const activeId = useStore((s) => s.activeInspectionId);
@@ -185,11 +246,13 @@ export function AppShell({ children }: { children: ReactNode }) {
     if (ready && activeId && !field) useStore.setState({ activeInspectionId: null });
   }, [ready, activeId, field]);
 
+  if (gate.onAuthPage) return <>{ready ? children : null}<Toaster /></>;
+
   return (
     <div className="flex min-h-full">
       {/* Desktop sidebar */}
       <aside className="no-print fixed inset-y-0 left-0 z-30 hidden w-60 flex-col bg-slate-950 lg:flex">
-        <div className="flex h-16 items-center px-5"><Link href={fieldMode ? `/inspections/${field!.inspection.id}/entry` : "/"}><Wordmark /></Link></div>
+        <div className="flex h-16 items-center px-5"><Link href={fieldMode ? `/inspections/${field!.inspection.id}/entry` : adminView ? "/" : "/jobs"}><Wordmark /></Link></div>
         {fieldMode ? (
           <>
             <ActiveCard field={field!} />
@@ -197,11 +260,11 @@ export function AppShell({ children }: { children: ReactNode }) {
           </>
         ) : (
           <>
-            <div className="px-3 pb-4">
+            {adminView ? <div className="px-3 pb-4">
               <Link href="/inspections/new" className="flex items-center justify-center gap-2 rounded-md bg-thermal-600 px-3 py-2.5 text-sm font-semibold text-white shadow-sm hover:bg-thermal-500">
                 <Plus className="h-4 w-4" /> New Inspection
               </Link>
-            </div>
+            </div> : null}
             <NavLinks />
           </>
         )}
@@ -217,13 +280,17 @@ export function AppShell({ children }: { children: ReactNode }) {
               <div className="flex items-center gap-1.5 text-[10px] font-bold uppercase tracking-wider text-thermal-300"><span className="h-1.5 w-1.5 rounded-full bg-thermal-400" />Active Inspection</div>
               <div className="truncate text-sm font-semibold text-white">{field!.facility?.name}</div>
             </div>
+            <SyncBadge className="max-w-[38%] shrink-0 truncate text-[11px] leading-tight" />
             <button onClick={openCheckpoint} className="rounded-lg border border-white/15 px-3 py-2 text-sm font-medium text-slate-100 hover:bg-white/10">Exit</button>
           </div>
         ) : (
           <div className="flex h-14 items-center justify-between px-3">
             <button onClick={() => setOpen(true)} className="rounded-lg p-2 text-slate-300 hover:bg-white/10" aria-label="Open navigation"><Menu className="h-6 w-6" /></button>
-            <Link href="/"><Wordmark compact /></Link>
-            <Link href="/inspections/new" className="rounded-lg bg-thermal-600 p-2 text-white" aria-label="New inspection"><Plus className="h-6 w-6" /></Link>
+            <Link href={adminView ? "/" : "/jobs"}><Wordmark compact /></Link>
+            <div className="flex min-w-0 items-center justify-end gap-2">
+              <SyncBadge className="min-w-0 truncate text-[11px]" />
+              {adminView ? <Link href="/inspections/new" className="shrink-0 rounded-lg bg-thermal-600 p-2 text-white" aria-label="New inspection"><Plus className="h-6 w-6" /></Link> : null}
+            </div>
           </div>
         )}
       </div>
@@ -244,16 +311,20 @@ export function AppShell({ children }: { children: ReactNode }) {
       <div className="flex min-w-0 flex-1 flex-col overflow-x-clip pt-[calc(3.5rem+env(safe-area-inset-top))] lg:pl-60 lg:pt-0">
         <div className={cn("no-print items-center gap-2 border-b border-amber-200 bg-amber-50 px-4 py-1.5 text-xs text-amber-900 sm:px-8", fieldMode ? "hidden lg:flex" : "flex")}>
           <ShieldAlert className="h-3.5 w-3.5 shrink-0" />
-          <span><strong>Prototype.</strong> Fictional demo data, saved only on this device (not a secure database). Do not enter real customer information.</span>
+          {cloud
+            ? <span><strong>Collaborative preview.</strong> Saved on this device first, then synced to your organization&apos;s database. Photos stay on the phone that took them.</span>
+            : <span><strong>Prototype.</strong> Fictional demo data, saved only on this device (not a secure database). Do not enter real customer information.</span>}
         </div>
         {!online ? (
           <div className="no-print flex items-center gap-2 bg-slate-800 px-4 py-1.5 text-xs text-amber-200 sm:px-8" role="status">
             <CloudOff className="h-3.5 w-3.5 shrink-0" />
-            <span><strong>Offline.</strong> Keep working: everything is saved on this device. Nothing needs to upload in this prototype.</span>
+            {cloud
+              ? <span><strong>Offline.</strong> Keep working: everything is saved on this phone. Your new changes are <strong>not visible on other phones</strong> until this phone reconnects.</span>
+              : <span><strong>Offline.</strong> Keep working: everything is saved on this device. Nothing needs to upload in this prototype.</span>}
           </div>
         ) : null}
         <main className={cn("mx-auto w-full max-w-[1600px] flex-1 px-4 sm:px-8", fieldMode ? "py-4 sm:py-6" : "py-6 sm:py-8")}>
-          {!ready ? <div className="flex h-64 items-center justify-center text-sm text-slate-400">Loading workspace…</div>
+          {!ready || gate.waiting ? <div className="flex h-64 items-center justify-center text-sm text-slate-400">Loading workspace…</div>
             : !allowed && field ? <ActiveGuard field={field} />
             : children}
         </main>

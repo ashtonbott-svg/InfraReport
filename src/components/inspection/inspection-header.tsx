@@ -12,6 +12,11 @@ import { useStore } from "@/lib/store/store";
 import { formatDate } from "@/lib/format";
 import { toast } from "@/components/ui/toast";
 import { inspectorNames } from "@/components/forms/thermographer-picker";
+import { useRole } from "@/lib/cloud/role";
+import { SyncNotice } from "@/components/sync/sync-status";
+
+/** Statuses a technician may set. Approval and later stages are administrator-only (also enforced by the database). */
+const TECH_STATUSES: InspectionStatus[] = ["In Progress", "Needs Review"];
 
 export function InspectionHeader({ inspection, errorCount }: { inspection: Inspection; errorCount: number }) {
   const pathname = usePathname();
@@ -19,6 +24,8 @@ export function InspectionHeader({ inspection, errorCount }: { inspection: Inspe
   const facility = useFacilities().find((f) => f.id === inspection.facilityId);
   const inspector = inspectorNames(inspection.inspectorIds, useUsers());
   const setStatus = useStore((s) => s.setInspectionStatus);
+  const { isAdmin, adminView } = useRole();
+  const statusOptions = isAdmin ? INSPECTION_STATUSES : [...new Set([inspection.status, ...TECH_STATUSES])];
   const base = `/inspections/${inspection.id}`;
   const tabs = [
     { href: base, label: "Overview" },
@@ -27,6 +34,7 @@ export function InspectionHeader({ inspection, errorCount }: { inspection: Inspe
   ];
 
   const changeStatus = (s: InspectionStatus) => {
+    if (!isAdmin && !TECH_STATUSES.includes(s)) { toast("Only an administrator can set this status", "error"); return; }
     const idx = INSPECTION_STATUSES.indexOf(s);
     if (idx >= INSPECTION_STATUSES.indexOf("Approved") && errorCount > 0) {
       toast(`Resolve ${errorCount} validation error${errorCount === 1 ? "" : "s"} before approval`, "error");
@@ -39,7 +47,8 @@ export function InspectionHeader({ inspection, errorCount }: { inspection: Inspe
   return (
     <div className="mb-6">
       <div className="mb-1 text-xs font-medium text-slate-500">
-        <Link href="/inspections" className="hover:underline">Inspections</Link> / <Link href={`/customers/${customer?.id}`} className="hover:underline">{customer?.name}</Link>
+        {adminView ? <><Link href="/inspections" className="hover:underline">Inspections</Link> / <Link href={`/customers/${customer?.id}`} className="hover:underline">{customer?.name}</Link></>
+          : <><Link href="/jobs" className="hover:underline">My Jobs</Link> / {customer?.name}</>}
       </div>
       <div className="flex flex-col gap-3 sm:flex-row sm:items-end sm:justify-between">
         <div>
@@ -53,12 +62,13 @@ export function InspectionHeader({ inspection, errorCount }: { inspection: Inspe
         </div>
         <label className="flex items-center gap-2 text-xs font-medium text-slate-600">
           Status
-          <Select className="h-8 w-44 text-xs" value={inspection.status} onChange={(e) => changeStatus(e.target.value as InspectionStatus)}>
-            {INSPECTION_STATUSES.map((s) => <option key={s}>{s}</option>)}
+          <Select className="h-8 w-44 text-xs" value={inspection.status} disabled={!isAdmin && !TECH_STATUSES.includes(inspection.status)} onChange={(e) => changeStatus(e.target.value as InspectionStatus)}>
+            {statusOptions.map((s) => <option key={s} disabled={!isAdmin && !TECH_STATUSES.includes(s)}>{s}</option>)}
           </Select>
         </label>
       </div>
-      <div className="mt-4 flex gap-1 overflow-x-auto border-b border-slate-200">
+      <div className="mt-4"><SyncNotice inspectionId={inspection.id} /></div>
+      <div className="flex gap-1 overflow-x-auto border-b border-slate-200">
         {tabs.map((t) => (
           <Link key={t.href} href={t.href}
             className={cn("-mb-px whitespace-nowrap border-b-2 px-3 py-2 text-sm font-medium",

@@ -3,7 +3,7 @@
 import { create } from "zustand";
 import { supabase } from "../cloud/client";
 import { useStore } from "../store/store";
-import { SyncEngine, type SyncSnapshot } from "./engine";
+import { SyncEngine, storageKey, type SyncSnapshot } from "./engine";
 import type { Conflict, PendingOp, SyncData } from "./outbox";
 
 export type SyncLabel = "Saved on Device" | "Syncing" | "Synced to Cloud" | "Offline" | "Pending Changes" | "Sync Failed" | "Needs Attention";
@@ -62,6 +62,7 @@ export function startSync(userId: string, orgId: string) {
   if (!sb) return;
   if (engine && engine.userId === userId && engine.orgId === orgId) return;
   stopSync();
+  switchPerson(userId, orgId);
   engine = new SyncEngine({
     sb,
     getState: () => useStore.getState(),
@@ -87,6 +88,36 @@ export function startSync(userId: string, orgId: string) {
   void engine.sync().catch(() => undefined);
 }
 
+const LAST_USER_KEY = "infrareport-cloud-last-user";
+
+/**
+ * A different person signing in on this phone must not see the previous
+ * person's cached jobs. Shared records are cleared from the device store and
+ * reloaded from the cloud under the new person's permissions, but only when
+ * the previous person has nothing waiting to upload (their work is never dropped).
+ */
+function switchPerson(userId: string, orgId: string) {
+  const prev = localStore.get(LAST_USER_KEY);
+  if (prev && prev !== userId) {
+    let pending = 0;
+    try { pending = Object.keys(JSON.parse(localStore.get(storageKey(prev, orgId)) ?? "{}").ops ?? {}).length; } catch { pending = 0; }
+    if (pending === 0) {
+      const keep = <T extends { organizationId: string }>(list: T[]) => list.filter((x) => x.organizationId !== orgId);
+      useStore.setState((s) => ({
+        customers: keep(s.customers), facilities: keep(s.facilities), locations: keep(s.locations), equipment: keep(s.equipment),
+        inspections: keep(s.inspections), rooms: keep(s.rooms), results: keep(s.results), reviewEvents: keep(s.reviewEvents),
+        activeInspectionId: s.inspections.some((i) => i.id === s.activeInspectionId && i.organizationId === orgId) ? null : s.activeInspectionId,
+      }));
+      // The new person's own sync position no longer matches the store: reload everything they can see.
+      try {
+        const mine = JSON.parse(localStore.get(storageKey(userId, orgId)) ?? "null");
+        if (mine) localStore.set(storageKey(userId, orgId), JSON.stringify({ ...mine, cursors: {}, versions: {}, orphans: {} }));
+      } catch { /* ignore */ }
+    }
+  }
+  localStore.set(LAST_USER_KEY, userId);
+}
+
 function onOnline() { engine?.wake(); schedule(200); }
 function onVisible() { if (document.visibilityState === "visible") schedule(200); }
 
@@ -110,3 +141,4 @@ export const retryFailed = () => { engine?.retryFailed(); schedule(200); };
 export const fullResync = () => { engine?.resetCursors(); schedule(200); };
 export const syncData = (): SyncData | null => engine?.data ?? null;
 export const hasUnsyncedWork = () => !!engine && Object.keys(engine.data.ops).length > 0;
+export const discardFailed = (key: string) => { engine?.discardFailed(key); schedule(200); };

@@ -2,10 +2,11 @@
  * Keeps the app usable with poor or no connectivity once it has been opened:
  *  - hashed build assets: cache first (they never change)
  *  - pages and route data: network first, falling back to the last cached copy
- * Inspection data itself never goes through here; it lives on the device
- * (localStorage + IndexedDB) and is not uploaded anywhere.
+ * Inspection data never goes through here: it is saved on the device
+ * (localStorage + IndexedDB) and, when signed in, synced by the app straight
+ * to the database. API routes and the database are never cached.
  */
-const CACHE = "infrareport-v3";
+const CACHE = "infrareport-v4";
 const SHELL = ["/", "/manifest.webmanifest", "/icon-192.png", "/icon-512.png"];
 
 self.addEventListener("install", (event) => {

@@ -20,6 +20,9 @@ import { downloadText } from "@/lib/download";
 import { cn } from "@/lib/cn";
 import { ExteriorCapture, useFieldState } from "@/components/field/exterior-photos";
 import { buildingLabel } from "@/lib/domain/site-visit";
+import { useRole } from "@/lib/cloud/role";
+import { syncNow, useSyncStatus } from "@/lib/sync/runtime";
+import { LastSynced } from "@/components/sync/sync-status";
 
 const sevIcon: Record<Severity, React.ReactNode> = {
   error: <AlertCircle className="h-4 w-4 text-red-600" />,
@@ -40,6 +43,26 @@ export default function ReviewPage() {
   const [show, setShow] = useState<Severity | "all">("all");
   const [exporting, setExporting] = useState(false);
   const field = useFieldState(id);
+  const { isAdmin, cloud } = useRole();
+  const sync = useSyncStatus();
+  const facilityId = bundle?.dataset.inspection.facilityId;
+  const outstanding = useMemo(() => sync.ops.filter((o) => o.row.inspection_id === id || (o.table === "inspections" && o.id === id) || (facilityId && o.row.facility_id === facilityId)), [sync.ops, id, facilityId]);
+  const syncIssues = outstanding.length + sync.conflictList.length;
+  /** Before exporting from a shared inspection, make sure the person knows what is not in the cloud yet. */
+  const confirmSyncState = async () => {
+    if (!sync.active) return true;
+    await syncNow()?.catch(() => undefined);
+    const st = useSyncStatus.getState();
+    const mine = st.ops.filter((o) => o.row.inspection_id === id || (o.table === "inspections" && o.id === id) || (facilityId && o.row.facility_id === facilityId));
+    if (!mine.length && !st.conflictList.length && !st.offline) return true;
+    const parts = [
+      mine.filter((o) => !o.failed).length ? `${mine.filter((o) => !o.failed).length} change(s) on this phone have not reached the cloud yet` : "",
+      mine.filter((o) => o.failed).length ? `${mine.filter((o) => o.failed).length} change(s) failed to sync` : "",
+      st.conflictList.length ? `${st.conflictList.length} conflict(s) still need a decision` : "",
+      st.offline ? "this phone is offline, so recent work from other phones may be missing" : "",
+    ].filter(Boolean);
+    return confirm(`Sync is not complete: ${parts.join("; ")}.\n\nThe file will contain what is on this phone right now. Export anyway?`);
+  };
 
   const rows = useMemo(() => (bundle ? buildGeneratorRows(bundle.dataset) : []), [bundle]);
   if (!bundle) return <EmptyState title="Inspection not found" action={<Link href="/inspections"><Button>Back</Button></Link>} />;
@@ -52,7 +75,8 @@ export default function ReviewPage() {
   const visible = issues.filter((i) => show === "all" || i.severity === show);
   const photoBlocked = !!field && !field.exit.allowed && inspection.siteVisit.state !== "completed" && (inspection.status === "Draft" || inspection.status === "In Progress");
 
-  const exportCsv = () => {
+  const exportCsv = async () => {
+    if (!(await confirmSyncState())) return;
     const csv = toCsv(rows, { includeBom });
     // Self-check: re-parse and confirm the structure before handing the file over.
     const parsed = parseCsv(csv);
@@ -64,6 +88,7 @@ export default function ReviewPage() {
   };
 
   const exportXlsx = async () => {
+    if (!(await confirmSyncState())) return;
     setExporting(true);
     try {
       const n = await exportInspectionXlsx(dataset, { customer, facility, inspectionDate: inspection.date, thermographers: inspectorNames(inspection.inspectorIds, users) });
@@ -118,6 +143,7 @@ export default function ReviewPage() {
               </table>
             </div>
             <CardBody className="border-t border-slate-100 text-xs text-slate-500">
+              {cloud ? <div className="mb-1"><LastSynced />. One combined workbook: every room and equipment line synced from all phones.</div> : null}
               Gray cells are blank and stay blank in the file, so columns never shift. Generator formula columns O, P and Q are never written. Severity and calculated values remain the Generator&apos;s job.
             </CardBody>
           </Card>
@@ -138,12 +164,19 @@ export default function ReviewPage() {
                   <ExteriorCapture field={field} takeLabel="Take Photo" />
                 </div>
               ) : null}
+              {cloud && syncIssues ? (
+                <div className="rounded-lg border border-amber-300 bg-amber-50 p-3 text-amber-900" data-testid="review-sync-warning">
+                  <strong>Not fully synced.</strong> {outstanding.length ? `${outstanding.length} change(s) from this phone are not in the cloud yet. ` : ""}{sync.conflictList.length ? `${sync.conflictList.length} conflict(s) need a decision. ` : ""}
+                  <Link href="/sync" className="underline">Open Sync</Link>
+                </div>
+              ) : null}
               <div className="flex flex-wrap gap-2">
                 <Button disabled={inspection.status === "Needs Review" || photoBlocked} onClick={() => { if (setStatus(inspection.id, "Needs Review")) toast("Sent for review"); else toast("Building exterior photo required before review", "error"); }}>Submit for review</Button>
-                <Button variant="primary" disabled={counts.error > 0 || photoBlocked || inspection.status === "Approved"} onClick={() => { if (setStatus(inspection.id, "Approved", `${counts.warning} warnings acknowledged`)) toast("Inspection approved"); else toast("Building exterior photo required before approval", "error"); }}>
+                {isAdmin ? <Button variant="primary" disabled={counts.error > 0 || photoBlocked || inspection.status === "Approved"} onClick={() => { if (setStatus(inspection.id, "Approved", `${counts.warning} warnings acknowledged`)) toast("Inspection approved"); else toast("Building exterior photo required before approval", "error"); }}>
                   <CheckCircle2 className="h-4 w-4" />Approve
-                </Button>
+                </Button> : null}
               </div>
+              {!isAdmin ? <p className="text-xs text-slate-500">After you submit, an administrator reviews and approves the inspection.</p> : null}
               <p className="text-xs text-slate-500">Finished PDF report generation is not connected yet. It will be enabled only after your existing Generator is integrated and verified.</p>
             </CardBody>
           </Card>

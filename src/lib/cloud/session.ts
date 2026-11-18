@@ -85,6 +85,13 @@ async function loadMembership(userId: string): Promise<{ me: Member; orgName: st
   return { me, orgName: String(org?.name ?? ""), members: (all ?? []).map(toMember) };
 }
 
+function storedSessionUserId(): string | undefined {
+  try {
+    const raw = JSON.parse(localStorage.getItem("infrareport-auth") ?? "null");
+    return raw?.user?.id ?? raw?.currentSession?.user?.id ?? undefined;
+  } catch { return undefined; }
+}
+
 function cache(v: { me: Member; orgName: string; members: Member[] } | null) {
   try {
     if (v) localStorage.setItem(CACHE_KEY, JSON.stringify(v)); else localStorage.removeItem(CACHE_KEY);
@@ -116,8 +123,11 @@ export async function startSession() {
 export async function refreshIdentity() {
   const sb = supabase();
   if (!sb) return;
-  const { data } = await sb.auth.getSession();
-  const uid = data.session?.user.id;
+  const { data } = await sb.auth.getSession().catch(() => ({ data: { session: null } }));
+  // Offline with an expired access token, getSession() can come back empty although the
+  // person never signed out. The stored session is only removed on a real sign-out or a
+  // refused refresh, so its presence means "still signed in": keep working on the device.
+  const uid = data.session?.user.id ?? storedSessionUserId();
   if (!uid) { useSession.setState({ status: "signedOut", me: null }); return; }
   const prev = cached();
   try {

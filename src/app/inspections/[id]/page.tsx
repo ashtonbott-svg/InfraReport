@@ -19,6 +19,8 @@ import { useBeginFieldWork } from "@/lib/store/field-actions";
 import { visitDayCount } from "@/lib/domain/site-visit";
 import { Play } from "lucide-react";
 import { ThermographerPicker } from "@/components/forms/thermographer-picker";
+import { useRole } from "@/lib/cloud/role";
+
 
 export default function InspectionOverviewPage() {
   const { id } = useParams<{ id: string }>();
@@ -26,6 +28,7 @@ export default function InspectionOverviewPage() {
   const events = useReviewEvents().filter((e) => e.inspectionId === id).sort((a, b) => b.at.localeCompare(a.at));
   const users = useUsers();
   const updateInspection = useStore((s) => s.updateInspection);
+  const { isAdmin } = useRole();
   const field = useFieldState(id);
   const activeId = useStore((s) => s.activeInspectionId);
   const begin = useBeginFieldWork();
@@ -84,8 +87,8 @@ export default function InspectionOverviewPage() {
           <Card>
             <CardHeader title="Inspection settings" />
             <CardBody className="grid gap-4 sm:grid-cols-3">
-              <Field label="Inspection date" htmlFor="o-date"><Input id="o-date" type="date" value={inspection.date} onChange={(e) => updateInspection(id, { date: e.target.value })} /></Field>
-              <div className="sm:col-span-3"><ThermographerPicker idPrefix="o-th" value={inspection.inspectorIds} onChange={(ids) => updateInspection(id, { inspectorIds: ids })} /></div>
+              <Field label="Inspection date" htmlFor="o-date"><Input id="o-date" type="date" disabled={!isAdmin} value={inspection.date} onChange={(e) => updateInspection(id, { date: e.target.value })} /></Field>
+              <div className="sm:col-span-3"><ThermographerPicker idPrefix="o-th" readOnly={!isAdmin} value={inspection.inspectorIds} onChange={(ids) => updateInspection(id, { inspectorIds: ids })} /></div>
               <Field label="Default emissivity" htmlFor="o-em" hint="0.95 unless explicitly changed. Rows can override.">
                 <Input id="o-em" inputMode="decimal" value={inspection.defaultEmissivity} onChange={(e) => updateInspection(id, { defaultEmissivity: e.target.value })} />
               </Field>

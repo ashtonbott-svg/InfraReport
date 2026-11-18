@@ -16,6 +16,8 @@ import { downloadText } from "@/lib/download";
 import { todayISO } from "@/lib/format";
 import { DemoDataNotice } from "@/components/field/demo-data-notice";
 import { deletePhotoBlob } from "@/lib/photos/photo-db";
+import { useRole } from "@/lib/cloud/role";
+import { CloudUploadCard } from "@/components/settings/cloud-upload";
 
 export default function SettingsPage() {
   const org = useOrganization();
@@ -23,6 +25,7 @@ export default function SettingsPage() {
   const resetDemoData = useStore((s) => s.resetDemoData);
   const [cause, setCause] = useState("");
   const fileRef = useRef<HTMLInputElement>(null);
+  const { cloud, isAdmin, adminView } = useRole();
   if (!org) return null;
   const s = org.settings;
 
@@ -56,8 +59,9 @@ export default function SettingsPage() {
     <>
       <PageHeader title="Settings" description={`${org.name}${org.isDemo ? " · demonstration organization" : ""}`} />
       <div className="grid gap-6 xl:grid-cols-2">
+        {cloud && isAdmin && adminView ? <CloudUploadCard /> : null}
         <Card>
-          <CardHeader title="Inspection defaults" />
+          <CardHeader title="Inspection defaults" description={cloud ? "Saved on this device." : undefined} />
           <CardBody className="space-y-4">
             <Field label="Default emissivity for new inspections" htmlFor="s-em" hint="0.95 unless you explicitly change it.">
               <Input id="s-em" className="max-w-32" inputMode="decimal" value={s.defaultEmissivity} onChange={(e) => updateOrgSettings({ defaultEmissivity: e.target.value })} />
@@ -101,21 +105,22 @@ export default function SettingsPage() {
         </Card>
 
         <Card className="xl:col-span-2">
-          <CardHeader title="Prototype data storage" actions={<Badge tone="amber"><Database className="h-3 w-3" />Browser localStorage · schema v{SCHEMA_VERSION}</Badge>} />
+          <CardHeader title={cloud ? "Device storage" : "Prototype data storage"} actions={<Badge tone="amber"><Database className="h-3 w-3" />Browser localStorage · schema v{SCHEMA_VERSION}</Badge>} />
           <CardBody className="space-y-4 text-sm text-slate-600">
-            <p>Everything you enter is saved in this browser only. It is not encrypted, not backed up, not shared between devices, and not a secure database. Clearing site data erases it. Use fictional data only until authentication, a Postgres database with per organization isolation, and private file storage are in place.</p>
+            {cloud ? <p>Every change is saved on this phone first and then uploaded to your organization&apos;s database. Restoring a backup and erasing this device are turned off while signed in, because they could remove shared records. A backup download is still available.</p> : null}
+            <p className={cloud ? "hidden" : undefined}>Everything you enter is saved in this browser only. It is not encrypted, not backed up, not shared between devices, and not a secure database. Clearing site data erases it. Use fictional data only until authentication, a Postgres database with per organization isolation, and private file storage are in place.</p>
             <div className="flex flex-wrap gap-2">
               <Button onClick={backup}><Download className="h-4 w-4" />Download JSON backup</Button>
-              <Button onClick={() => fileRef.current?.click()}><Upload className="h-4 w-4" />Restore backup</Button>
+              {!cloud ? <Button onClick={() => fileRef.current?.click()}><Upload className="h-4 w-4" />Restore backup</Button> : null}
               <input ref={fileRef} type="file" accept="application/json" className="hidden" onChange={(e) => { restore(e.target.files?.[0]); e.target.value = ""; }} />
-              <Button variant="danger" onClick={async () => {
+              {!cloud ? <Button variant="danger" onClick={async () => {
                 const typed = prompt("This permanently erases ALL customers, facilities, equipment, inspections and photos on this device. Download a backup first.\n\nType ERASE to confirm.");
                 if (typed?.trim().toUpperCase() !== "ERASE") { if (typed !== null) toast("Nothing was erased", "error"); return; }
                 const ids = useStore.getState().photos.map((p) => p.id);
                 resetDemoData();
                 await Promise.all(ids.map((pid) => deletePhotoBlob(pid).catch(() => undefined)));
                 toast("All data erased from this device");
-              }}><RotateCcw className="h-4 w-4" />Erase all data on this device</Button>
+              }}><RotateCcw className="h-4 w-4" />Erase all data on this device</Button> : null}
             </div>
             <div className="border-t border-slate-100 pt-4">
               <div className="mb-2 text-sm font-medium text-slate-800">Sample data from earlier prototype versions</div>

@@ -10,6 +10,9 @@ import { EmptyState, PageHeader, Stat, Table, td, th } from "@/components/ui/mis
 import { INSPECTION_STATUSES } from "@/lib/domain/constants";
 import { ResumeInspections } from "@/components/field/resume-card";
 import { DemoDataNotice } from "@/components/field/demo-data-notice";
+import { JobBoard } from "@/components/jobs/job-board";
+import { SyncNotice } from "@/components/sync/sync-status";
+import { useRole } from "@/lib/cloud/role";
 import { inspectorNames } from "@/components/forms/thermographer-picker";
 import { formatDate, formatDateTime, plural } from "@/lib/format";
 import {
@@ -26,6 +29,7 @@ export default function DashboardPage() {
   const results = useResults();
   const events = useReviewEvents();
   const users = useUsers();
+  const { cloud } = useRole();
 
   const byStatus = useMemo(() => {
     const m = new Map<string, number>();
@@ -51,7 +55,14 @@ export default function DashboardPage() {
       />
 
       <DemoDataNotice />
+      <SyncNotice />
       <ResumeInspections />
+      {cloud ? (
+        <Card className="mb-6">
+          <CardHeader title="Jobs" description="Every inspection with its team and live room and equipment progress. Submitted jobs are your review queue." />
+          <CardBody><JobBoard empty={<p className="text-sm text-slate-500">No inspections yet. Create one with New Inspection and assign technicians.</p>} /></CardBody>
+        </Card>
+      ) : null}
 
       <div className="grid grid-cols-2 gap-3 lg:grid-cols-4">
         <Stat label="Open inspections" value={active.length} sub={`${byStatus.get("Needs Review") ?? 0} need review`} icon={<ClipboardList className="h-4 w-4" />} />

@@ -7,7 +7,7 @@ import { StatusBadge } from "@/components/ui/badge";
 import { useCustomers, useFacilities, useInspections, useLocations, useResults, useRooms } from "@/lib/store/hooks";
 import { useStore } from "@/lib/store/store";
 import { useBeginFieldWork } from "@/lib/store/field-actions";
-import { checkExit, requiredBuildings, visitDayCount } from "@/lib/domain/site-visit";
+import { checkExit, exteriorPhotoOptional, requiredBuildings, visitDayCount } from "@/lib/domain/site-visit";
 import { locationLabel } from "@/lib/domain/csv";
 import { formatDateTime } from "@/lib/format";
 
@@ -34,7 +34,7 @@ export function ResumeInspections() {
           facility: facilities.find((f) => f.id === i.facilityId)?.name ?? "",
           room: i.siteVisit.lastActiveLocationId ? locMap.get(i.siteVisit.lastActiveLocationId) : undefined,
           count: results.filter((r) => r.inspectionId === i.id).length,
-          exit: checkExit(requiredBuildings(inspRooms, locMap), photos, i.id),
+          exit: checkExit(requiredBuildings(inspRooms, locMap), photos, i.id, exteriorPhotoOptional(i)),
           days: visitDayCount(i),
         };
       });
@@ -55,7 +55,8 @@ export function ResumeInspections() {
                 <span>Day {Math.max(days, 1)}</span>
                 <span>Last saved {formatDateTime(i.updatedAt)}</span>
                 <StatusBadge status={i.status} />
-                {exit.allowed ? <span className="inline-flex items-center gap-1 text-emerald-700"><CheckCircle2 className="h-3.5 w-3.5" />Exterior photo saved</span>
+                {exit.allowed && exit.missing.length ? <span className="inline-flex items-center gap-1 text-slate-500"><Camera className="h-3.5 w-3.5" />Exterior photo optional</span>
+                  : exit.allowed ? <span className="inline-flex items-center gap-1 text-emerald-700"><CheckCircle2 className="h-3.5 w-3.5" />Exterior photo saved</span>
                   : <span className="inline-flex items-center gap-1 text-amber-700"><Camera className="h-3.5 w-3.5" />Exterior photo required</span>}
               </div>
             </div>

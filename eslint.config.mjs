@@ -12,6 +12,11 @@ const eslintConfig = defineConfig([
     "out/**",
     "build/**",
     "next-env.d.ts",
+    // Generated copy of the pdf.js worker (see the copy-pdf-worker script) and plain Node helper scripts.
+    "public/pdf.worker.min.mjs",
+    "scripts/**/*.cjs",
+    // Frozen snapshot of saved data from an earlier release, used to test upgrades.
+    "tests/fixtures/demo-seed-v2.ts",
   ]),
 ]);
 
