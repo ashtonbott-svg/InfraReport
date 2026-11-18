@@ -9,18 +9,23 @@
 import type { DataState } from "../store/store";
 import { newSiteVisit } from "../domain/site-visit";
 import { newThermalImage } from "../domain/thermal";
-import type { Customer, Equipment, Facility, Inspection, InspectionResult, InspectionRoomConditions, Location, ReviewEvent, ThermalImage } from "../domain/types";
+import type { Customer, Equipment, ExteriorCheck, Facility, Inspection, InspectionResult, InspectionRoomConditions, Location, ReviewEvent, ThermalImage } from "../domain/types";
 import { EMPTY_OVERRIDES } from "../domain/rules";
 
 export type TableName =
   | "customers" | "facilities" | "locations" | "equipment" | "inspections"
-  | "inspection_assignments" | "room_conditions" | "results" | "thermal_images" | "review_events";
+  | "inspection_assignments" | "room_conditions" | "results" | "thermal_images" | "review_events" | "exterior_checks";
 
 /** Push order: parents before children so foreign keys always resolve. */
 export const TABLE_ORDER: TableName[] = [
   "customers", "facilities", "locations", "equipment", "inspections", "inspection_assignments",
-  "room_conditions", "results", "thermal_images", "review_events",
+  "room_conditions", "results", "thermal_images", "review_events", "exterior_checks",
 ];
+
+/** Tables added by later migrations: a database without them yet is not an error (nothing to sync). */
+export const OPTIONAL_TABLES = new Set<TableName>(["exterior_checks"]);
+/** First write wins on the same id (an acknowledgment by either phone is enough; no conflict prompt). */
+export const FIRST_WINS = new Set<TableName>(["exterior_checks"]);
 
 export type Row = Record<string, unknown>;
 
@@ -44,23 +49,30 @@ export function equipmentRow(e: Equipment): Row {
   return { id: e.id, organization_id: e.organizationId, facility_id: e.facilityId, location_id: e.locationId, name: e.name, equipment_type: e.equipmentType, default_component: e.defaultComponent, identifiers: S(e.identifiers), imported_from: S(e.importedFrom), active: e.active, sort_order: e.sortOrder };
 }
 export function inspectionRow(i: Inspection): Row {
-  return { id: i.id, organization_id: i.organizationId, customer_id: i.customerId, facility_id: i.facilityId, date: i.date, status: i.status, default_emissivity: i.defaultEmissivity, notes: i.notes, reopen_reason: i.reopenReason ?? "" };
+  return { id: i.id, organization_id: i.organizationId, customer_id: i.customerId, facility_id: i.facilityId, date: i.date, status: i.status, default_emissivity: i.defaultEmissivity, notes: i.notes, reopen_reason: i.reopenReason ?? "",
+    primary_thermographer: i.primaryThermographerId ?? null, primary_locked: i.primaryLocked ?? false };
 }
 export function roomRow(r: InspectionRoomConditions): Row {
   return { id: r.id, organization_id: r.organizationId, inspection_id: r.inspectionId, location_id: r.locationId, humidity: r.humidity, ambient_temp: r.ambientTemp, background_temp: r.backgroundTemp, image_date: r.imageDate, conditions_copied_from: r.conditionsCopiedFrom ?? null, completed_at: r.completedAt ?? null };
 }
 export function resultRow(r: InspectionResult): Row {
-  return { id: r.id, organization_id: r.organizationId, inspection_id: r.inspectionId, equipment_id: r.equipmentId, location_id: r.locationId, opened: r.opened, exception: r.exception ?? null, confidence: r.confidence, review_notes: r.reviewNotes, overrides: r.overrides, source: r.source, sort_order: r.sortOrder };
+  return { id: r.id, organization_id: r.organizationId, inspection_id: r.inspectionId, equipment_id: r.equipmentId, location_id: r.locationId, opened: r.opened, exception: r.exception ?? null, confidence: r.confidence, review_notes: r.reviewNotes, overrides: r.overrides, source: r.source, sort_order: r.sortOrder, photo_notes: r.photoNotes ?? [] };
 }
 export function imageRow(r: InspectionResult, img: ThermalImage, index: number): Row {
   return { id: img.id, organization_id: r.organizationId, inspection_id: r.inspectionId, result_id: r.id, sort_order: index, component: img.component, ir_image_number: img.irImageNumber, visual_image_number: img.visualImageNumber, visual_overridden: img.visualOverridden, distance: img.distance, possible_cause: img.possibleCause, max_temp: img.maxTemp, notes: img.notes };
+}
+export function exteriorRow(c: ExteriorCheck): Row {
+  return { id: c.id, organization_id: c.organizationId, inspection_id: c.inspectionId, building: c.building, status: c.status, note: c.note, acknowledged_by: c.acknowledgedBy, acknowledged_at: c.acknowledgedAt };
+}
+export function toExteriorCheck(r: Row): ExteriorCheck {
+  return { id: S(r.id), organizationId: S(r.organization_id), inspectionId: S(r.inspection_id), building: S(r.building), status: S(r.status) as ExteriorCheck["status"], note: S(r.note), acknowledgedBy: (r.acknowledged_by as string | null) ?? null, acknowledgedAt: S(r.acknowledged_at) };
 }
 export function eventRow(e: ReviewEvent): Row {
   return { id: e.id, organization_id: e.organizationId, inspection_id: e.inspectionId, action: e.action, detail: e.detail, at: e.at };
 }
 
 /** Every syncable record of one organization, keyed "table:id". */
-export function extractRecords(s: Pick<DataState, "customers" | "facilities" | "locations" | "equipment" | "inspections" | "rooms" | "results" | "reviewEvents">, orgId: string): Map<string, SyncRecord> {
+export function extractRecords(s: Pick<DataState, "customers" | "facilities" | "locations" | "equipment" | "inspections" | "rooms" | "results" | "reviewEvents"> & Partial<Pick<DataState, "exteriorChecks">>, orgId: string): Map<string, SyncRecord> {
   const out = new Map<string, SyncRecord>();
   const add = (table: TableName, id: string, row: Row) => out.set(`${table}:${id}`, { table, id, row });
   for (const c of s.customers) if (c.organizationId === orgId) add("customers", c.id, customerRow(c));
@@ -79,6 +91,7 @@ export function extractRecords(s: Pick<DataState, "customers" | "facilities" | "
     r.images.forEach((img, i) => add("thermal_images", img.id, imageRow(r, img, i)));
   }
   for (const e of s.reviewEvents) if (e.organizationId === orgId) add("review_events", e.id, eventRow(e));
+  for (const c of s.exteriorChecks ?? []) if (c.organizationId === orgId) add("exterior_checks", c.id, exteriorRow(c));
   return out;
 }
 
@@ -107,6 +120,10 @@ export function toInspection(r: Row, existing?: Inspection): Inspection {
     submittedAt: (r.submitted_at as string | null) ?? null, approvedAt: (r.approved_at as string | null) ?? null,
     firstApprovedAt: (r.first_approved_at as string | null) ?? null, reopenedAt: (r.reopened_at as string | null) ?? null,
     reopenCount: num(r.reopen_count), reopenReason: S(r.reopen_reason),
+    approvalSnapshot: (r.approval_snapshot as Inspection["approvalSnapshot"]) ?? null,
+    primaryThermographerId: (r.primary_thermographer as string | null) ?? null,
+    primaryLocked: r.primary_locked === true,
+    submittedBy: (r.submitted_by as string | null) ?? null,
   };
 }
 export function toRoom(r: Row): InspectionRoomConditions {
@@ -116,7 +133,9 @@ export function toResult(r: Row, images: ThermalImage[]): InspectionResult {
   return {
     id: S(r.id), organizationId: S(r.organization_id), inspectionId: S(r.inspection_id), equipmentId: S(r.equipment_id), locationId: S(r.location_id),
     images: images.length ? images : [newThermalImage()], opened: S(r.opened) || "Yes, Completely", exception: (r.exception as InspectionResult["exception"]) ?? null,
-    confidence: S(r.confidence), reviewNotes: S(r.review_notes), overrides: { ...EMPTY_OVERRIDES, ...((r.overrides as object) ?? {}) },
+    confidence: S(r.confidence), reviewNotes: S(r.review_notes),
+    ...(Array.isArray(r.photo_notes) && r.photo_notes.length ? { photoNotes: r.photo_notes as InspectionResult["photoNotes"] } : {}),
+    overrides: { ...EMPTY_OVERRIDES, ...((r.overrides as object) ?? {}) },
     source: (S(r.source) || "manual") as InspectionResult["source"], sortOrder: num(r.sort_order), createdAt: S(r.created_at), updatedAt: S(r.updated_at),
   };
 }
@@ -129,7 +148,7 @@ export function toEvent(r: Row): ReviewEvent {
 
 /** Columns that the database owns; never sent by clients. */
 export const SERVER_COLUMNS = new Set(["version", "created_at", "created_by", "updated_at", "updated_by", "deleted_at", "submitted_at", "submitted_by", "approved_at", "approved_by",
-  "first_approved_at", "reopened_at", "reopened_by", "reopen_count"]);
+  "first_approved_at", "reopened_at", "reopened_by", "reopen_count", "approval_snapshot", "submission_count"]);
 
 /** Natural keys: a second phone creating "the same" row gets folded into the existing one. */
 export const NATURAL_KEYS: Partial<Record<TableName, string[]>> = {

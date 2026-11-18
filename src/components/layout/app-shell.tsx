@@ -10,6 +10,8 @@ import { cn } from "@/lib/cn";
 import { useHydrateStore, useOrganization, useUsers } from "@/lib/store/hooks";
 import { onLockedEdit, useStore } from "@/lib/store/store";
 import { useFieldUi } from "@/lib/store/field-ui";
+import { promptExteriorIfNeeded } from "@/lib/store/field-actions";
+import { PrimaryPromptSheet } from "@/components/forms/primary-thermographer";
 import { Wordmark } from "./logo";
 import { Toaster, toast } from "@/components/ui/toast";
 import { Button } from "@/components/ui/button";
@@ -188,6 +190,9 @@ function FieldOverlays({ field }: { field: FieldState }) {
   return (
     <>
       <ExitCheckpoint open={ui.checkpointOpen} field={field} onClose={ui.closeCheckpoint} onExited={() => { ui.closeCheckpoint(); router.push("/"); }} />
+      {ui.primaryPrompt === field.inspection.id ? (
+        <PrimaryPromptSheet inspection={field.inspection} onDone={() => { ui.closePrimary(); promptExteriorIfNeeded(field.inspection.id); }} />
+      ) : null}
       {ui.exteriorSheet ? (
         <ExteriorPhotoSheet open mode={ui.exteriorSheet} field={field} onClose={ui.closeExterior}
           onSkip={() => { skip(field.inspection.id); ui.closeExterior(); }} />
@@ -291,7 +296,7 @@ export function AppShell({ children }: { children: ReactNode }) {
               <div className="flex items-center gap-1.5 text-[10px] font-bold uppercase tracking-wider text-thermal-300"><span className="h-1.5 w-1.5 rounded-full bg-thermal-400" />Active Inspection</div>
               <div className="truncate text-sm font-semibold text-white">{field!.facility?.name}</div>
             </div>
-            <SyncBadge className="max-w-[38%] shrink-0 truncate text-[11px] leading-tight" />
+            <SyncBadge compact className="max-w-[38%] shrink-0 truncate text-[11px] leading-tight" />
             <button onClick={openCheckpoint} className="rounded-lg border border-white/15 px-3 py-2 text-sm font-medium text-slate-100 hover:bg-white/10">Exit</button>
           </div>
         ) : (
@@ -299,7 +304,7 @@ export function AppShell({ children }: { children: ReactNode }) {
             <button onClick={() => setOpen(true)} className="rounded-lg p-2 text-slate-300 hover:bg-white/10" aria-label="Open navigation"><Menu className="h-6 w-6" /></button>
             <Link href={adminView ? "/" : "/jobs"}><Wordmark compact /></Link>
             <div className="flex min-w-0 items-center justify-end gap-2">
-              <SyncBadge className="min-w-0 truncate text-[11px]" />
+              <SyncBadge compact className="min-w-0 truncate text-[11px]" />
               {adminView ? <Link href="/inspections/new" className="shrink-0 rounded-lg bg-thermal-600 p-2 text-white" aria-label="New inspection"><Plus className="h-6 w-6" /></Link> : null}
             </div>
           </div>
@@ -320,12 +325,13 @@ export function AppShell({ children }: { children: ReactNode }) {
       ) : null}
 
       <div className="flex min-w-0 flex-1 flex-col overflow-x-clip pt-[calc(3.5rem+env(safe-area-inset-top))] lg:pl-60 lg:pt-0">
-        <div className={cn("no-print items-center gap-2 border-b border-amber-200 bg-amber-50 px-4 py-1.5 text-xs text-amber-900 sm:px-8", fieldMode ? "hidden lg:flex" : "flex")}>
-          <ShieldAlert className="h-3.5 w-3.5 shrink-0" />
-          {cloud
-            ? <span><strong>Collaborative preview.</strong> Saved on this device first, then synced to your organization&apos;s database. Photos stay on the phone that took them.</span>
-            : <span><strong>Prototype.</strong> Fictional demo data, saved only on this device (not a secure database). Do not enter real customer information.</span>}
-        </div>
+        {/* Device-only builds keep their warning. Signed-in (cloud) use shows the sync status instead. */}
+        {!cloud ? (
+          <div className={cn("no-print items-center gap-2 border-b border-amber-200 bg-amber-50 px-4 py-1.5 text-xs text-amber-900 sm:px-8", fieldMode ? "hidden lg:flex" : "flex")}>
+            <ShieldAlert className="h-3.5 w-3.5 shrink-0" />
+            <span><strong>Prototype.</strong> Fictional demo data, saved only on this device (not a secure database). Do not enter real customer information.</span>
+          </div>
+        ) : null}
         {!online ? (
           <div className="no-print flex items-center gap-2 bg-slate-800 px-4 py-1.5 text-xs text-amber-200 sm:px-8" role="status">
             <CloudOff className="h-3.5 w-3.5 shrink-0" />

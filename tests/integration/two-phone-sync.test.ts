@@ -6,84 +6,11 @@
  *
  *   npx supabase start && npx supabase db reset && npm run test:integration
  */
-import { beforeAll, describe, expect, it } from "vitest";
-import { createClient, type SupabaseClient } from "@supabase/supabase-js";
-import { createStore, type StoreApi } from "zustand/vanilla";
-import pg from "pg";
-import { storeInitializer, type Store } from "@/lib/store/store";
-import { SyncEngine } from "@/lib/sync/engine";
+import { beforeAll, expect, it } from "vitest";
+import { createClient } from "@supabase/supabase-js";
+import { buildGeneratorRows } from "@/lib/domain/csv";
+import { Phone, PUB, SECRET, URL, noPersist, pepper, run, sql, uniq } from "./helpers";
 import { activateDevice, createActivation, createTechnician, type AuthDeps } from "@/lib/server/tech-auth";
-import { buildGeneratorRows, type ExportDataset } from "@/lib/domain/csv";
-import { DEFAULT_EMISSIVITY } from "@/lib/domain/constants";
-
-const URL = process.env.SUPABASE_TEST_URL;
-const PUB = process.env.SUPABASE_TEST_PUBLISHABLE_KEY!;
-const SECRET = process.env.SUPABASE_TEST_SECRET_KEY!;
-const DB = process.env.SUPABASE_TEST_DB_URL!;
-const run = URL ? describe : describe.skip;
-const pepper = "test-pepper-0123456789-0123456789-abcdef";
-const uniq = () => Math.random().toString(36).slice(2, 10);
-const noPersist = { auth: { persistSession: false, autoRefreshToken: false } };
-
-async function sql(q: string, params: unknown[] = []) {
-  const c = new pg.Client({ connectionString: DB });
-  await c.connect();
-  try { return (await c.query(q, params)).rows; } finally { await c.end(); }
-}
-
-interface Net { down: boolean; loseNextInsertAnswer: boolean; blockPath?: string }
-
-/** A phone: its own device store, its own outbox storage, its own network. */
-class Phone {
-  store: StoreApi<Store>;
-  storage = new Map<string, string>();
-  engine!: SyncEngine;
-  net: Net = { down: false, loseNextInsertAnswer: false };
-  sb!: SupabaseClient;
-  constructor(public name: string, public userId: string, public orgId: string, public members: { id: string; name: string }[]) {
-    this.store = createStore<Store>()(storeInitializer);
-    this.store.setState((s) => ({
-      currentOrgId: orgId, currentUserId: userId,
-      organizations: [...s.organizations, { id: orgId, name: "Infinite Infrared LLC", slug: "c", isDemo: false, createdAt: "", settings: { defaultEmissivity: DEFAULT_EMISSIVITY, customPossibleCauses: [], csvIncludeBom: true } }],
-      users: [...s.users, ...members.map((m) => ({ id: m.id, organizationId: orgId, name: m.name, email: "", role: "inspector" as const }))],
-    }));
-  }
-  async signIn(session: { access_token: string; refresh_token: string }) {
-    const net = this.net;
-    const wrapped: typeof fetch = async (input, init) => {
-      if (net.down || (net.blockPath && String(input).includes(net.blockPath))) throw new TypeError("Failed to fetch");
-      const res = await fetch(input, init);
-      if (net.loseNextInsertAnswer && init?.method === "POST" && String(input).includes("/rest/v1/")) {
-        net.loseNextInsertAnswer = false;
-        throw new TypeError("Failed to fetch"); // the database got it; the phone never heard back
-      }
-      return res;
-    };
-    this.sb = createClient(URL!, PUB, { ...noPersist, db: { retry: false }, global: { fetch: wrapped } });
-    const { error } = await this.sb.auth.setSession(session);
-    if (error) throw error;
-    this.boot();
-  }
-  /** (Re)start the app: a new engine reading the persisted outbox, like a page refresh. */
-  boot() {
-    this.engine = new SyncEngine({
-      sb: this.sb, getState: () => this.store.getState(), setState: (p) => this.store.setState(p),
-      storage: { get: (k) => this.storage.get(k) ?? null, set: (k, v) => void this.storage.set(k, v) },
-    }, this.userId, this.orgId);
-    this.store.subscribe((s) => this.engine.onLocalChange(s));
-  }
-  get s() { return this.store.getState(); }
-  async sync() { this.engine.wake(); await this.engine.sync(); }
-  dataset(inspectionId: string): ExportDataset {
-    const s = this.s;
-    return {
-      inspection: s.inspections.find((i) => i.id === inspectionId)!,
-      results: s.results.filter((r) => r.inspectionId === inspectionId),
-      equipment: new Map(s.equipment.map((e) => [e.id, e])), locations: new Map(s.locations.map((l) => [l.id, l])),
-      rooms: s.rooms.filter((r) => r.inspectionId === inspectionId),
-    };
-  }
-}
 
 run("Two phones on one inspection (real Supabase, real store, real sync)", () => {
   let ashton: Phone, justice: Phone;
@@ -298,6 +225,39 @@ run("Two phones on one inspection (real Supabase, real store, real sync)", () =>
     expect(rowsJ).toEqual(rowsA);
     const irs = rowsA.map((r) => String(r[8])).filter(Boolean).sort();
     expect(irs).toEqual(expect.arrayContaining(["101", "205", "206", "301"]));
+  });
+
+  it("the front building photo: either phone confirms it once, the other phone sees it", async () => {
+    await ashton.sync(); await justice.sync();
+    expect(justice.s.exitCheck(inspId).allowed).toBe(false); // reminder: nobody has dealt with it yet
+    expect(ashton.s.exitCheck(inspId).missing).toEqual(justice.s.exitCheck(inspId).missing);
+    for (const b of justice.s.exitCheck(inspId).missing) expect(justice.s.acknowledgeExterior(inspId, b, "camera")).toBe(true);
+    await justice.sync();
+    await ashton.sync();
+    expect(ashton.s.exitCheck(inspId).allowed).toBe(true);
+    const c = ashton.s.exteriorChecks.find((x) => x.inspectionId === inspId)!;
+    expect(c).toMatchObject({ status: "camera", acknowledgedBy: justice.userId });
+    const db = await sql("select status, acknowledged_by from public.exterior_checks where inspection_id = $1", [inspId]);
+    expect(db).toEqual([{ status: "camera", acknowledged_by: justice.userId }]);
+    // An exception needs a reason.
+    expect(ashton.s.acknowledgeExterior(inspId, "Annex", "exception", "")).toBe(false);
+  });
+
+  it("both phones confirm the same building offline: the first one wins, no conflict prompt", async () => {
+    const building = "Warehouse";
+    ashton.net.down = true; justice.net.down = true;
+    ashton.s.acknowledgeExterior(inspId, building, "photo");
+    justice.s.acknowledgeExterior(inspId, building, "camera");
+    ashton.net.down = false; justice.net.down = false;
+    await ashton.sync();
+    await justice.sync();
+    await ashton.sync();
+    const rows = await sql("select status, acknowledged_by from public.exterior_checks where inspection_id = $1 and building = $2", [inspId, building]);
+    expect(rows).toEqual([{ status: "photo", acknowledged_by: ashton.userId }]);
+    for (const p of [ashton, justice]) {
+      expect(p.s.exteriorChecks.filter((x) => x.inspectionId === inspId && x.building === building).map((x) => x.status)).toEqual(["photo"]);
+      expect(p.engine.snapshot()).toMatchObject({ pending: 0, failed: 0, conflicts: 0 });
+    }
   });
 
   it("a submission waits until the technician's readings are in the database", async () => {

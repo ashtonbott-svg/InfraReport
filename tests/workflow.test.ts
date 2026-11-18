@@ -83,7 +83,7 @@ describe("inspection workflow", () => {
     const ds = datasetFor(inspectionId);
     const parsed = parseCsv(toCsv(buildGeneratorRows(ds)));
     expect(parsed).toHaveLength(7);
-    expect(parsed.every((r) => r.length === 16)).toBe(true);
+    expect(parsed.every((r) => r.length === 15)).toBe(true);
     const byName = Object.fromEntries(parsed.slice(1).map((r) => [r[4], r]));
     expect(byName["Panel P1"][6]).toBe("4"); // Distance stays in column 7 (Excel H)
     expect(byName["Transformer T1"][6]).toBe("3");

@@ -6,9 +6,9 @@ import { activateDevice } from "@/lib/server/tech-auth";
 export async function POST(req: NextRequest) {
   try {
     assertSameOrigin(req);
-    const body = await readJson<{ token?: string; tempPin?: string; newPin?: string; confirmPin?: string; label?: string }>(req);
+    const body = await readJson<{ token?: string; tempPin?: string; newPin?: string; confirmPin?: string; currentPin?: string; label?: string }>(req);
     const r = await activateDevice(authDeps(), {
-      token: String(body.token ?? ""), tempPin: String(body.tempPin ?? ""), newPin: String(body.newPin ?? ""),
+      token: String(body.token ?? ""), tempPin: String(body.tempPin ?? ""), newPin: String(body.newPin ?? ""), currentPin: String(body.currentPin ?? ""),
       confirmPin: String(body.confirmPin ?? ""), label: String(body.label ?? req.headers.get("user-agent") ?? "").slice(0, 80), ip: clientIp(req),
     });
     const res = NextResponse.json({ userId: r.userId, name: r.name, session: sessionPayload(r.session) }, { headers: { "cache-control": "no-store" } });

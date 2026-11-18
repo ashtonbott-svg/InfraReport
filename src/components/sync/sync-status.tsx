@@ -20,11 +20,11 @@ const TONE_LIGHT: Record<SyncLabel, string> = {
 };
 
 /** Compact cloud status. "Synced to Cloud" appears only after the database confirmed every change. */
-export function SyncBadge({ dark = true, className }: { dark?: boolean; className?: string }) {
+export function SyncBadge({ dark = true, className, compact }: { dark?: boolean; className?: string; compact?: boolean }) {
   const s = useSyncStatus();
   if (!s.active) return null;
   const Icon = ICON[s.label];
-  const extra = s.label === "Needs Attention" ? ` (${s.conflicts})` : s.label === "Sync Failed" ? ` (${s.failed})` : (s.label === "Offline" || s.label === "Pending Changes") && s.pending ? ` · ${s.pending} waiting` : "";
+  const extra = s.label === "Needs Attention" ? ` (${s.conflicts})` : s.label === "Sync Failed" ? ` (${s.failed})` : (s.label === "Offline" || s.label === "Pending Changes") && s.pending ? (compact ? ` (${s.pending})` : ` · ${s.pending} waiting`) : "";
   return (
     <Link href="/sync" className={cn("flex items-center gap-1.5 text-xs font-medium", dark ? TONE[s.label] : TONE_LIGHT[s.label], className)} data-testid="sync-badge" aria-live="polite">
       <Icon className={cn("h-3.5 w-3.5 shrink-0", s.label === "Syncing" && "animate-spin")} />

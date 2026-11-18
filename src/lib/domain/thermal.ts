@@ -129,3 +129,47 @@ export function nextComponent(existing: string[]): string {
   if (m) return `${m[1]}${Number(m[2]) + 1}`;
   return "";
 }
+
+/* ----------------------------- multiple views ----------------------------- */
+
+export type ViewPreset = "full" | "top-bottom" | "left-right" | "main-bus";
+export const VIEW_PRESETS: { key: ViewPreset; label: string; components: (full: string) => string[] }[] = [
+  { key: "full", label: "Full Equipment", components: (full) => [full] },
+  { key: "top-bottom", label: "Top & Bottom", components: () => ["Top Half", "Bottom Half"] },
+  { key: "left-right", label: "Left & Right", components: () => ["Left Side", "Right Side"] },
+  { key: "main-bus", label: "Main & Bus", components: () => ["Main", "Bus"] },
+];
+
+/** True when an image entry holds anything typed besides its component name. */
+export function imageHasData(i: ThermalImage): boolean {
+  return !!(i.irImageNumber.trim() || (i.visualOverridden && i.visualImageNumber.trim()) || i.distance.trim() || i.maxTemp.trim() || i.notes.trim()
+    || (i.possibleCause && i.possibleCause !== "NONE"));
+}
+
+export interface ViewPlan {
+  /** Existing entries that only get a new component name (readings untouched). */
+  rename: { id: string; component: string }[];
+  /** New, empty entries to add. */
+  add: string[];
+  /** Extra empty entries that can go without asking. */
+  removeEmpty: string[];
+  /** Extra entries that hold readings: only removed after explicit confirmation. */
+  removeWithData: string[];
+}
+
+/**
+ * Change an item's views without losing anything: entries are matched in
+ * order, keep every reading, note and finding, and only their component name
+ * changes. Missing views are added. Leftover entries are listed separately,
+ * split into empty ones and ones with data (which need confirmation).
+ */
+export function planViews(images: ThermalImage[], targets: string[]): ViewPlan {
+  const plan: ViewPlan = { rename: [], add: [], removeEmpty: [], removeWithData: [] };
+  targets.forEach((component, i) => {
+    const img = images[i];
+    if (!img) plan.add.push(component);
+    else if (img.component.trim() !== component) plan.rename.push({ id: img.id, component });
+  });
+  for (const img of images.slice(targets.length)) (imageHasData(img) ? plan.removeWithData : plan.removeEmpty).push(img.id);
+  return plan;
+}

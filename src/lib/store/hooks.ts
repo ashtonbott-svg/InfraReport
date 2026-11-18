@@ -2,7 +2,7 @@
 
 import { useEffect, useMemo, useState } from "react";
 import { useStore, allowedCauses } from "./store";
-import type { ExportDataset } from "../domain/csv";
+import { withApprovalSnapshot, type ExportDataset } from "../domain/csv";
 import { validateInspection, type ValidationIssue } from "../domain/validation";
 import type { ID } from "../domain/types";
 
@@ -50,13 +50,13 @@ export function useInspectionBundle(inspectionId: ID): InspectionBundle | null {
   return useMemo(() => {
     const inspection = inspections.find((i) => i.id === inspectionId);
     if (!inspection) return null;
-    const dataset: ExportDataset = {
+    const dataset: ExportDataset = withApprovalSnapshot({
       inspection,
       results: results.filter((r) => r.inspectionId === inspectionId),
       equipment: new Map(equipment.map((e) => [e.id, e])),
       locations: new Map(locations.map((l) => [l.id, l])),
       rooms: rooms.filter((r) => r.inspectionId === inspectionId),
-    };
+    });
     return { dataset, issues: validateInspection(dataset, { allowedCauses: causes }) };
   }, [inspections, results, equipment, locations, rooms, causes, inspectionId]);
 }

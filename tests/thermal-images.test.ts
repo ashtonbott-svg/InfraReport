@@ -65,7 +65,7 @@ describe("multiple thermal images per equipment", () => {
     expect(S().equipment.filter((e) => e.facilityId === facilityId)).toHaveLength(4); // still 4 physical items
     expect(byName("Panel P1").images).toHaveLength(2);
     const rows = parseCsv(toCsv(buildGeneratorRows(ds(id)))).slice(1);
-    expect(rows.every((r) => r.length === 16)).toBe(true);
+    expect(rows.every((r) => r.length === 15)).toBe(true);
     expect(rows.map((r) => `${r[4]}|${r[5]}|${r[6]}|${r[8]}|${r[9]}`)).toEqual([
       "Panel P1|Top Half|4|104|104",
       "Panel P1|Bottom Half|3|105|105",
@@ -191,8 +191,9 @@ describe("upgrade of saved field-test data (schema v3 -> v4)", () => {
     expect(out.photos).toHaveLength(1);
     const csv = parseCsv(toCsv(buildGeneratorRows({ inspection: out.inspections[0], results: out.results, equipment: new Map(out.equipment.map((e) => [e.id, e])), locations: new Map(out.locations.map((l) => [l.id, l])), rooms: out.rooms })));
     expect(csv.slice(1)).toEqual([
-      ["11/12/2026", "Electrical Room 1", "45", "73", "Panel P1", "Full Panel", "4", "NONE", "104", "104", "0.95", "", "74", "Yes, Completely", "", ""],
-      ["11/12/2026", "Electrical Room 1", "45", "73", "Panel P2", "Circuit 11", "6", "Loose Connection(s)", "105", "", "0.95", "131.7", "74", "Yes, with Dead-Front on", "", "x"],
+      ["11/12/2026", "Electrical Room 1", "45", "73", "Panel P1", "Full Panel", "4", "NONE", "104", "104", "0.95", "", "74", "Yes, Completely", ""],
+      // "hot lug" was typed as the finding note and was missing from earlier exports; now it is kept, next to the equipment note "x".
+      ["11/12/2026", "Electrical Room 1", "45", "73", "Panel P2", "Circuit 11", "6", "Loose Connection(s)", "105", "", "0.95", "131.7", "74", "Yes, with Dead-Front on", "hot lug; x"],
     ]);
   });
 });

@@ -1,7 +1,7 @@
 "use client";
 
 import { useRouter } from "next/navigation";
-import { useState, useSyncExternalStore } from "react";
+import { useEffect, useState, useSyncExternalStore } from "react";
 import { Button } from "@/components/ui/button";
 import { Field, Input } from "@/components/ui/field";
 import { adoptSession } from "@/lib/cloud/session";
@@ -29,21 +29,34 @@ export default function ActivatePage() {
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [step, setStep] = useState<1 | 2>(1);
+  const [currentPin, setCurrentPin] = useState("");
+  // Whose link it is, and whether they already have a PIN (then the PIN is kept, not replaced).
+  const [info, setInfo] = useState<{ name: string; hasPin: boolean } | { error: string } | null>(null);
+  useEffect(() => {
+    if (!token) return;
+    let alive = true;
+    fetch("/api/tech/activation-info", { method: "POST", credentials: "same-origin", headers: { "content-type": "application/json" }, body: JSON.stringify({ token }) })
+      .then(async (r) => { const b = await r.json().catch(() => ({})); if (alive) setInfo(r.ok ? b : { error: b.error ?? "This activation link cannot be used." }); })
+      .catch(() => { if (alive) setInfo({ error: "No connection. Connect to the internet and open the link again." }); });
+    return () => { alive = false; };
+  }, [token]);
+  const keepPin = !!info && "hasPin" in info && info.hasPin;
 
 
   const digits = (v: string) => v.replace(/\D/g, "").slice(0, 6);
   const submit = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (step === 1) { if (tempPin.length >= 5) setStep(2); return; }
+    if (!keepPin && step === 1) { if (tempPin.length >= 5) setStep(2); return; }
     setError(null); setBusy(true);
     try {
       const res = await fetch("/api/tech/activate", {
         method: "POST", credentials: "same-origin", headers: { "content-type": "application/json" },
-        body: JSON.stringify({ token, tempPin, newPin, confirmPin, label: navigator.userAgent.slice(0, 80) }),
+        body: JSON.stringify(keepPin ? { token, currentPin, label: navigator.userAgent.slice(0, 80) } : { token, tempPin, newPin, confirmPin, label: navigator.userAgent.slice(0, 80) }),
       });
       const body = await res.json().catch(() => ({}));
       if (!res.ok) {
         if (body.code === "temp_pin_wrong") { setStep(1); setTempPin(""); }
+        if (body.code === "pin_wrong") setCurrentPin("");
         throw new Error(body.error ?? "Activation failed");
       }
       await adoptSession(body.session);
@@ -55,6 +68,24 @@ export default function ActivatePage() {
 
   if (token === null) return <Shell><p className="text-sm text-slate-500">Loading…</p></Shell>;
   if (!token) return <Shell><p className="text-sm text-slate-600">This page needs the activation link from your administrator. Open the full link on this phone.</p></Shell>;
+
+  if (info === null) return <Shell><p className="text-sm text-slate-500">Checking the link…</p></Shell>;
+  if ("error" in info) return <Shell><p role="alert" className="text-sm text-red-700">{info.error}</p></Shell>;
+  if (keepPin) {
+    return (
+      <Shell>
+        <h1 className="mb-1 text-lg font-semibold text-slate-900">Trust this phone, {info.name.split(" ")[0]}</h1>
+        <p className="mb-4 text-sm text-slate-500">Enter the PIN you already sign in with. Your PIN stays the same.</p>
+        <form onSubmit={submit} className="space-y-4">
+          <Field label="Your PIN" htmlFor="current">
+            <Input id="current" type="password" inputMode="numeric" autoComplete="current-password" value={currentPin} onChange={(e) => setCurrentPin(digits(e.target.value))} className="h-12 text-center text-2xl tracking-[0.5em]" />
+          </Field>
+          <Button type="submit" variant="primary" size="lg" className="h-12 w-full justify-center text-base" disabled={busy || currentPin.length < 4}>{busy ? "Activating…" : "Trust This Phone and Sign In"}</Button>
+        </form>
+        {error ? <p role="alert" className="mt-4 rounded-md bg-red-50 px-3 py-2 text-sm text-red-700">{error}</p> : null}
+      </Shell>
+    );
+  }
 
   return (
     <Shell>

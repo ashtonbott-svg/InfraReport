@@ -10,7 +10,7 @@
 import { beforeAll, describe, expect, it } from "vitest";
 import { createClient, type SupabaseClient } from "@supabase/supabase-js";
 import pg from "pg";
-import { activateDevice, AuthError, createActivation, createTechnician, deviceTechnicians, pinLogin, resetPin, revokeDevice, updateTechnician, type AuthDeps } from "@/lib/server/tech-auth";
+import { activateDevice, activationInfo, AuthError, createActivation, createTechnician, deviceTechnicians, pinLogin, resetPin, revokeDevice, updateTechnician, type AuthDeps } from "@/lib/server/tech-auth";
 
 const URL = process.env.SUPABASE_TEST_URL;
 const PUB = process.env.SUPABASE_TEST_PUBLISHABLE_KEY!;
@@ -112,6 +112,24 @@ run("Supabase auth + Row Level Security (real database)", () => {
     clock = new Date();
   });
 
+  it("a new phone or a new web address: activation link + CURRENT PIN; the PIN is kept, 12345 does not work", async () => {
+    const d = deps();
+    const before = (await sql("select pin_hash from public.tech_credentials where user_id = $1", [justiceId]))[0].pin_hash;
+    const { token } = await createActivation(d, ashtonId, justiceId);
+    expect(await activationInfo(d, { token, ip: "4.4.4.1" })).toEqual({ name: "Justice Thompson", hasPin: true });
+    // The temporary PIN cannot be used to take over an account that already has a PIN.
+    await expect(activateDevice(d, { token, tempPin: "12345", newPin: "777777", confirmPin: "777777", label: "x", ip: "4.4.4.2" })).rejects.toThrow(/PIN is not correct/);
+    await expect(activateDevice(d, { token, currentPin: "000000", label: "x", ip: "4.4.4.3" })).rejects.toThrow(/PIN is not correct/);
+    const r = await activateDevice(d, { token, currentPin: "482913", label: "Justice phone (production)", ip: "4.4.4.4" });
+    expect(r.keptPin).toBe(true);
+    expect((await sql("select pin_hash from public.tech_credentials where user_id = $1", [justiceId]))[0].pin_hash).toBe(before);
+    // The new device signs in with the same PIN; the earlier device still works too.
+    expect((await pinLogin(d, { deviceToken: r.deviceToken, userId: justiceId, pin: "482913", ip: "4.4.4.5" })).userId).toBe(justiceId);
+    expect((await pinLogin(d, { deviceToken: justiceDevice, userId: justiceId, pin: "482913", ip: "4.4.4.6" })).userId).toBe(justiceId);
+    // Single use as before.
+    await expect(activateDevice(d, { token, currentPin: "482913", label: "x", ip: "4.4.4.7" })).rejects.toThrow(/invalid, already used or expired/);
+  });
+
   it("PIN login: trusted device + personal PIN; lockout after repeated failures", async () => {
     const d = deps();
     expect((await deviceTechnicians(d, [justiceDevice])).map((x) => x.name)).toEqual(["Justice Thompson"]);
@@ -201,7 +219,8 @@ run("Supabase auth + Row Level Security (real database)", () => {
   });
 
   it("technicians submit; only administrators approve or delete customers", async () => {
-    expect((await justice.from("inspections").update({ status: "Needs Review" }).eq("id", ids.insp).select("status, submitted_by")).data).toEqual([{ status: "Needs Review", submitted_by: justiceId }]);
+    const subm = await justice.from("inspections").update({ status: "Needs Review" }).eq("id", ids.insp).select("status, submitted_by");
+    expect(subm.data).toEqual([{ status: "Needs Review", submitted_by: justiceId }]);
     const tryApprove = await justice.from("inspections").update({ status: "Approved" }).eq("id", ids.insp);
     expect(tryApprove.error?.message).toMatch(/Only administrators/);
     expect((await justice.from("customers").delete().eq("id", ids.cust).select("id")).data ?? []).toEqual([]);

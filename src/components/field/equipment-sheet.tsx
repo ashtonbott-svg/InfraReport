@@ -1,16 +1,16 @@
 "use client";
 
 import { useEffect, useMemo, useRef, useState } from "react";
-import { Camera, Check, ChevronDown, ChevronLeft, ChevronRight, Copy, ImageOff, Loader2, Plus, RotateCcw, Trash2, Undo2, X } from "lucide-react";
+import { Camera, Check, ChevronDown, ChevronLeft, ChevronRight, Copy, ImageOff, ListPlus, Loader2, Pencil, Plus, RotateCcw, Trash2, Undo2, X } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Sheet } from "@/components/ui/sheet";
 import { toast } from "@/components/ui/toast";
 import { cn } from "@/lib/cn";
-import { allowedCauses, useStore } from "@/lib/store/store";
+import { allowedCauses, isInspectionLocked, useStore } from "@/lib/store/store";
 import { useDraft, useOnOpen } from "@/lib/use-draft";
 import { DEFAULT_OPENED, EQUIPMENT_PRESETS, LIMITED_ACCESS_OPENED, OPENED_VALUES, OTHER_EQUIPMENT_TYPE, POSSIBLE_CAUSE_NONE } from "@/lib/domain/constants";
 import { defaultComponentForType, inferTypeFromName, resolveEffective } from "@/lib/domain/rules";
-import { IMAGE_COMPONENTS, imageHasFinding, newThermalImage, nextComponent, patchThermalImage, resultStatus, roomProgress } from "@/lib/domain/thermal";
+import { IMAGE_COMPONENTS, VIEW_PRESETS, imageHasFinding, newThermalImage, nextComponent, patchThermalImage, planViews, resultStatus, roomProgress, type ViewPlan } from "@/lib/domain/thermal";
 import { applyTypeSuggestion, filterOpened, nameMatches, nextSequentialNames, splitLastToken, typeSuggestions } from "@/lib/domain/suggest";
 import { persistPhoto } from "@/lib/photos/capture";
 import { deletePhotoBlob } from "@/lib/photos/photo-db";
@@ -266,7 +266,7 @@ export function ImageEntryEditor({ idPrefix, image, onPatch, causes, autoFocusIr
       ) : (
         <div className="flex items-center justify-between text-sm text-slate-600">
           <span>Visual # <strong className="tabular-nums text-slate-800">{image.irImageNumber || "same as IR"}</strong>{image.irImageNumber ? " (same as IR)" : ""}</span>
-          <button type="button" className="py-1 font-medium text-thermal-700" onClick={() => onPatch({ visualOverridden: true, visualImageNumber: image.irImageNumber })}>Use Different Visual Number</button>
+          <button type="button" className="rounded-md border border-slate-200 bg-white px-2.5 py-1 text-sm font-normal text-slate-600 hover:bg-slate-50" data-testid="use-different-visual" onClick={() => onPatch({ visualOverridden: true, visualImageNumber: image.irImageNumber })}>Use Different Visual Number</button>
         </div>
       )}
       <div className="grid grid-cols-[1fr_auto] items-end gap-2">
@@ -285,12 +285,10 @@ export function ImageEntryEditor({ idPrefix, image, onPatch, causes, autoFocusIr
           </div>
         ) : null}
       </div>
-      {finding ? (
-        <div>
-          <label htmlFor={`${idPrefix}-notes`} className={lbl}>Finding notes</label>
-          <input id={`${idPrefix}-notes`} autoComplete="off" className={cn(big, "h-11")} value={image.notes} onChange={(e) => onPatch({ notes: e.target.value })} placeholder="e.g. Circuit 11 lug 40°F above similar" />
-        </div>
-      ) : null}
+      <div>
+        <label htmlFor={`${idPrefix}-notes`} className={lbl}>Notes for this view <span className="font-normal text-slate-400">(optional, exported in Review Notes)</span></label>
+        <input id={`${idPrefix}-notes`} autoComplete="off" className={cn(big, "h-11")} value={image.notes} onChange={(e) => onPatch({ notes: e.target.value })} placeholder="e.g. RC 6, A Phase, Class 2" />
+      </div>
     </div>
   );
 }
@@ -313,25 +311,57 @@ function ImageSummaryRow({ index, image, onOpen, onRemove }: { index: number; im
   );
 }
 
-/** Multiple thermal images for one equipment item, one expanded at a time. */
-function ImagesEditor({ images, activeId, setActiveId, onPatch, onAdd, onRemove, causes, idPrefix }: {
+/** Views (thermal image entries) of ONE physical equipment item, one expanded at a time. */
+function ImagesEditor({ images, activeId, setActiveId, onPatch, onAdd, onRemove, causes, idPrefix, equipmentName, fullComponent, onSetViews }: {
   images: ThermalImage[]; activeId: string; setActiveId: (id: string) => void; onPatch: (imageId: string, p: Partial<ThermalImage>) => void;
   onAdd: () => void; onRemove: (imageId: string) => void; causes: string[]; idPrefix: string;
+  equipmentName: string; fullComponent: string; onSetViews: (plan: ViewPlan, removeWithData: boolean) => void;
 }) {
   const active = images.find((i) => i.id === activeId) ?? images[0];
   const multi = images.length > 1;
+  const activeIdx = images.findIndex((i) => i.id === active.id);
+  const nextView = images[activeIdx + 1];
+  const goTo = (id: string) => { setActiveId(id); setTimeout(() => (document.getElementById(`${idPrefix}-${images.findIndex((i) => i.id === id)}-ir`) as HTMLInputElement | null)?.focus(), 30); };
+  const applyPreset = (targets: string[]) => {
+    const plan = planViews(images, targets);
+    let drop = false;
+    if (plan.removeWithData.length) {
+      drop = confirm(`${plan.removeWithData.length} existing view${plan.removeWithData.length === 1 ? " has" : "s have"} readings or notes. Remove ${plan.removeWithData.length === 1 ? "it" : "them"}?\n\nCancel keeps ${plan.removeWithData.length === 1 ? "it" : "them"} as extra views.`);
+    }
+    onSetViews(plan, drop);
+  };
+  const presetOn = (targets: string[]) => images.length === targets.length && targets.every((c, i) => images[i]?.component.trim() === c);
   return (
     <div className="space-y-2">
+      <div className="rounded-xl bg-slate-50 p-2.5">
+        <div className="mb-1.5 text-xs font-semibold uppercase tracking-wide text-slate-500">Views of {equipmentName || "this equipment"}</div>
+        <div className="-mx-0.5 flex gap-1.5 overflow-x-auto px-0.5 pb-0.5" role="group" aria-label="Quick views">
+          {VIEW_PRESETS.map((p) => {
+            const targets = p.components(fullComponent);
+            const on = presetOn(targets);
+            return (
+              <button key={p.key} type="button" onClick={() => applyPreset(targets)} data-testid={`views-${p.key}`} aria-pressed={on}
+                className={cn("h-9 shrink-0 rounded-full border px-3 text-sm", on ? "border-slate-800 bg-slate-800 text-white" : "border-slate-300 bg-white text-slate-700")}>{p.label}</button>
+            );
+          })}
+          <button type="button" onClick={onAdd} data-testid="views-custom" className="h-9 shrink-0 rounded-full border border-dashed border-slate-400 bg-white px-3 text-sm text-slate-700">Custom…</button>
+        </div>
+      </div>
       {images.map((img, idx) => img.id === active.id ? (
-        <div key={img.id} className={cn(multi && "rounded-xl border-2 border-thermal-300 bg-thermal-50/30 p-3")} data-testid="active-image">
-          {multi ? <div className="mb-2 flex items-center justify-between text-xs font-semibold uppercase tracking-wide text-thermal-800"><span>Image {idx + 1} of {images.length}</span>
-            <button type="button" className="rounded p-1 text-slate-400 hover:text-red-600" onClick={() => onRemove(img.id)} aria-label={`Remove image ${idx + 1}`}><Trash2 className="h-4 w-4" /></button></div> : null}
+        <div key={img.id} className={cn(multi && "rounded-xl border-2 border-slate-300 bg-white p-3")} data-testid="active-image">
+          {multi ? <div className="mb-2 flex items-center justify-between text-xs font-semibold uppercase tracking-wide text-slate-600"><span>{equipmentName || "Equipment"} · View {idx + 1} of {images.length}</span>
+            <button type="button" className="rounded p-1 text-slate-400 hover:text-red-600" onClick={() => onRemove(img.id)} aria-label={`Remove view ${idx + 1}`}><Trash2 className="h-4 w-4" /></button></div> : null}
           <ImageEntryEditor idPrefix={`${idPrefix}-${idx}`} image={img} onPatch={(p) => onPatch(img.id, p)} causes={causes} />
+          {nextView ? (
+            <Button type="button" className="mt-3 h-11 w-full justify-center" onClick={() => goTo(nextView.id)} data-testid="next-view">
+              Next View: {nextView.component || `View ${activeIdx + 2}`}<ChevronRight className="h-4 w-4" />
+            </Button>
+          ) : null}
         </div>
       ) : (
         <ImageSummaryRow key={img.id} index={idx} image={img} onOpen={() => setActiveId(img.id)} />
       ))}
-      <Button className="h-12 w-full justify-center border-dashed text-base" onClick={onAdd}><Plus className="h-5 w-5" />Add Another Image</Button>
+      <Button className="h-11 w-full justify-center border-dashed" onClick={onAdd} data-testid="add-view"><Plus className="h-4 w-4" />Add Equipment View</Button>
     </div>
   );
 }
@@ -371,6 +401,44 @@ export interface EquipmentSheetProps {
   /** Save & Next on the last item of the room: open the room checkpoint. */
   onEndOfRoom?: () => void;
   roomName?: string;
+  /** Create mode: place the new item directly after this equipment line. */
+  afterResultId?: string | null;
+  /** Edit mode: start adding a new item right after this one. */
+  onAddAfter?: (resultId: string) => void;
+}
+
+/** The equipment's name with an obvious pencil to correct it. Renaming keeps every reading, photo and note. */
+function EquipmentNameRow({ equipment, locked }: { equipment: Equipment | undefined; locked: boolean }) {
+  const updateEquipment = useStore((s) => s.updateEquipment);
+  const [editing, setEditing] = useState(false);
+  const [value, setValue] = useState(equipment?.name ?? "");
+  if (!equipment) return null;
+  const save = () => {
+    const v = value.trim();
+    if (!v) { toast("Name cannot be empty", "error"); return; }
+    if (v !== equipment.name) { updateEquipment(equipment.id, { name: v }); toast(`Renamed to ${v}`); }
+    setEditing(false);
+  };
+  if (editing) {
+    return (
+      <form className="flex items-center gap-2" onSubmit={(e) => { e.preventDefault(); save(); }}>
+        <input id="rename-input" autoFocus autoComplete="off" aria-label="Equipment name" className={cn(big, "h-12 min-w-0 flex-1 text-lg font-semibold")} value={value} onChange={(e) => setValue(e.target.value)} />
+        <Button type="submit" variant="primary" className="h-12 px-4" data-testid="rename-save"><Check className="h-5 w-5" />Save</Button>
+        <Button type="button" className="h-12 px-3" onClick={() => { setValue(equipment.name); setEditing(false); }} aria-label="Cancel rename"><X className="h-5 w-5" /></Button>
+      </form>
+    );
+  }
+  return (
+    <div className="flex items-center gap-2">
+      <div className="min-w-0 flex-1">
+        <div className="text-[11px] font-semibold uppercase tracking-wide text-slate-500">Equipment</div>
+        <div className="truncate text-lg font-semibold text-slate-900" data-testid="equipment-name">{equipment.name}</div>
+      </div>
+      <Button type="button" className="h-11 shrink-0 px-3" disabled={locked} onClick={() => { setValue(equipment.name); setEditing(true); }} data-testid="rename-equipment">
+        <Pencil className="h-4 w-4" />Edit Name
+      </Button>
+    </div>
+  );
 }
 
 export function EquipmentSheet(props: EquipmentSheetProps) {
@@ -393,7 +461,7 @@ function progressLine(rows: { result: InspectionResult }[], roomName?: string) {
   return `${roomName ? `${roomName} · ` : ""}${p.done} of ${p.total} done · ${p.remaining.length} to do`;
 }
 
-function CreateSheet({ open, onClose, inspection, locationId, room, defaults, suggestions, facilityNames, rows, roomName }: EquipmentSheetProps) {
+function CreateSheet({ open, onClose, inspection, locationId, room, defaults, suggestions, facilityNames, rows, roomName, afterResultId }: EquipmentSheetProps) {
   const addResult = useStore((s) => s.addResult);
   const causes = useCauses();
   const fresh = (component: string) => [newThermalImage({ component })];
@@ -405,6 +473,8 @@ function CreateSheet({ open, onClose, inspection, locationId, room, defaults, su
   const [componentTouched, setComponentTouched] = useState(false);
   const [seq, setSeq] = useState<string[]>(suggestions);
   const [saving, setSaving] = useState(false);
+  // Insert position: after the chosen item, then after each item just added (keeps a run of new items in order).
+  const [after, setAfter] = useState<string | null>(afterResultId ?? null);
   useOnOpen(open, () => { setName(defaults.name); setType(defaults.type); const im = fresh(defaults.component); setImages(im); setActiveId(im[0].id); setComponentTouched(false); setSeq(suggestions); });
 
   const applyType = (t: string) => {
@@ -426,7 +496,9 @@ function CreateSheet({ open, onClose, inspection, locationId, room, defaults, su
       name: name.trim(), equipmentType: type, component: first.component.trim(), irImageNumber: first.irImageNumber,
       visualImageNumber: first.visualOverridden ? first.visualImageNumber : first.irImageNumber,
       distance: first.distance, possibleCause: first.possibleCause, maxTemp: first.maxTemp, problemNotes: first.notes,
+      ...(after ? { afterResultId: after } : {}),
     });
+    if (after) setAfter(id);
     if (first.visualOverridden) useStore.getState().updateThermalImage(id, useStore.getState().results.find((r) => r.id === id)!.images[0].id, { visualOverridden: true, visualImageNumber: first.visualImageNumber });
     for (const im of more) useStore.getState().addThermalImage(id, { ...im, id: undefined });
     setSaving(false);
@@ -442,7 +514,8 @@ function CreateSheet({ open, onClose, inspection, locationId, room, defaults, su
   };
 
   return (
-    <Sheet open={open} onClose={onClose} title="Add Equipment" size="lg" subtitle={`${progressLine(rows, roomName)} · ${inheritsLine(room) ?? ""}`}
+    <Sheet open={open} onClose={onClose} title="Add Equipment" size="lg"
+      subtitle={`${after ? `Goes after ${rows.find((x) => x.result.id === after)?.equipment?.name ?? "the selected item"} · ` : ""}${progressLine(rows, roomName)} · ${inheritsLine(room) ?? ""}`}
       footer={
         <div className="grid grid-cols-[1fr_auto] gap-2">
           <Button variant="primary" size="lg" className="h-14 justify-center text-base" onClick={() => save(true)} disabled={saving || !name.trim()}><Plus className="h-5 w-5" />Save &amp; Add Next</Button>
@@ -455,15 +528,25 @@ function CreateSheet({ open, onClose, inspection, locationId, room, defaults, su
           <TypeSelect value={type} onChange={applyType} />
         </div>
         <ImagesEditor idPrefix="new" images={images} activeId={activeId || images[0].id} setActiveId={setActiveId} onPatch={patch} causes={causes}
-          onAdd={() => { const im = newThermalImage({ component: nextComponent(images.map((x) => x.component)) }); setImages((cur) => [...cur, im]); setActiveId(im.id); }}
-          onRemove={(iid) => setImages((cur) => (cur.length > 1 ? cur.filter((x) => x.id !== iid) : cur))} />
+          equipmentName={name.trim()} fullComponent={defaultComponentForType(type) || "Full Equipment"}
+          onAdd={() => { const im = newThermalImage({ component: nextComponent(images.map((x) => x.component)) }); setImages((cur) => [...cur, im]); setActiveId(im.id); setComponentTouched(true); }}
+          onRemove={(iid) => setImages((cur) => (cur.length > 1 ? cur.filter((x) => x.id !== iid) : cur))}
+          onSetViews={(plan, dropData) => {
+            setComponentTouched(true);
+            setImages((cur) => {
+              const renamed = cur.map((im) => { const r = plan.rename.find((x) => x.id === im.id); return r ? { ...im, component: r.component } : im; });
+              const gone = new Set([...plan.removeEmpty, ...(dropData ? plan.removeWithData : [])]);
+              const next = [...renamed.filter((im) => !gone.has(im.id)), ...plan.add.map((c) => newThermalImage({ component: c }))];
+              return next.length ? next : renamed.slice(0, 1);
+            });
+          }} />
         <button type="submit" className="hidden" />
       </form>
     </Sheet>
   );
 }
 
-function EditSheet({ open, onClose, inspection, room, row, next, prev, onNavigate, index, rows, roomName, onEndOfRoom }: EquipmentSheetProps & {
+function EditSheet({ open, onClose, inspection, room, row, next, prev, onNavigate, index, rows, roomName, onEndOfRoom, onAddAfter }: EquipmentSheetProps & {
   row: { result: InspectionResult; equipment: Equipment | undefined }; prev: string | null; next: string | null; index: number;
 }) {
   const { updateResult, updateEquipment, updateThermalImage: updateImage, addThermalImage: addImage, removeThermalImage: removeImage, setException, setOverride, duplicateResult, deleteResult, removePhotoRecord } = useStore();
@@ -518,12 +601,25 @@ function EditSheet({ open, onClose, inspection, room, row, next, prev, onNavigat
         </div>
       }>
       <div className="space-y-4">
+        <EquipmentNameRow key={eq?.id} equipment={eq} locked={isInspectionLocked(inspection)} />
         <ImagesEditor idPrefix="ed" images={r.images} activeId={activeId} setActiveId={setActiveId} causes={causes}
           onPatch={(iid, p) => updateImage(r.id, iid, p)}
+          equipmentName={eq?.name ?? ""} fullComponent={eq?.defaultComponent || defaultComponentForType(eq?.equipmentType ?? "") || "Full Equipment"}
+          onSetViews={(plan, dropData) => {
+            for (const x of plan.rename) updateImage(r.id, x.id, { component: x.component });
+            for (const c of plan.add) addImage(r.id, { component: c });
+            for (const id of [...plan.removeEmpty, ...(dropData ? plan.removeWithData : [])]) removeImage(r.id, id);
+          }}
           onAdd={() => { const id = addImage(r.id, { component: nextComponent(r.images.map((x) => x.component)) }); setActiveId(id); }}
           onRemove={(iid) => { const img = r.images.find((x) => x.id === iid); if (confirm(`Remove ${img?.component || "this image"}${img?.irImageNumber ? ` (IR ${img.irImageNumber})` : ""}?`)) { removeImage(r.id, iid); if (iid === activeId) setActiveId(r.images.find((x) => x.id !== iid)?.id ?? ""); } }} />
 
         <ExceptionPanel opened={r.opened} exception={r.exception} onOpened={(o) => updateResult(r.id, { opened: o })} onException={(e) => setException(r.id, e)} />
+
+        {onAddAfter && !isInspectionLocked(inspection) ? (
+          <Button type="button" className="h-11 w-full justify-center" onClick={() => onAddAfter(r.id)} data-testid="add-after">
+            <ListPlus className="h-4 w-4" />Add Equipment After {eq?.name || "This Item"}
+          </Button>
+        ) : null}
 
         <button type="button" onClick={() => setMore(!more)} className="flex min-h-12 w-full items-center justify-between rounded-xl bg-slate-100 px-3 text-sm font-medium text-slate-700" aria-expanded={more}>
           <span>More Details <span className="font-normal text-slate-500">· Opened: {r.opened === DEFAULT_OPENED ? "Yes, Completely" : r.opened} · Photos {eqPhotos.length + beforePhotos.length}</span></span>
@@ -556,7 +652,7 @@ function EditSheet({ open, onClose, inspection, room, row, next, prev, onNavigat
                 </div>
               ))}
             </div>
-            <EditText id="ed-review" labelText="Review Notes (exported)" value={r.reviewNotes} onCommit={(x) => updateResult(r.id, { reviewNotes: x })} />
+            <EditText id="ed-review" labelText="Equipment notes (exported on every row of this item)" value={r.reviewNotes} onCommit={(x) => updateResult(r.id, { reviewNotes: x })} />
             <p className="text-xs text-slate-500">Exports as H {eff.humidity || "blank"} · Bg {eff.backgroundTemp || "blank"} · Amb {eff.ambientTemp || "blank"} · ε {eff.emissivity}</p>
             <div className="grid grid-cols-2 gap-2 border-t border-slate-100 pt-4">
               <Button size="lg" className="h-12 justify-center" onClick={() => { const id = duplicateResult(r.id); if (id) { toast("Duplicated with next number"); onNavigate(id); } }}><Copy className="h-4 w-4" />Duplicate</Button>

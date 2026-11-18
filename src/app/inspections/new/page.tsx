@@ -13,6 +13,8 @@ import { ThermographerPicker } from "@/components/forms/thermographer-picker";
 import { toast } from "@/components/ui/toast";
 import { useCustomers, useEquipment, useFacilities, useInspections, useLocations } from "@/lib/store/hooks";
 import { useStore } from "@/lib/store/store";
+import { useUsers } from "@/lib/store/hooks";
+import { useRole } from "@/lib/cloud/role";
 import { useBeginFieldWork } from "@/lib/store/field-actions";
 import { formatDate, plural, todayISO } from "@/lib/format";
 
@@ -32,6 +34,9 @@ function NewInspectionForm() {
   const [facilityChoice, setFacilityId] = useState(params.get("facility") ?? "");
   const [date, setDate] = useState(todayISO());
   const [inspectorIds, setInspectorIds] = useState<string[]>([]);
+  const [primary, setPrimary] = useState("");
+  const users = useUsers();
+  const { cloud } = useRole();
   const [carryForward, setCarryForward] = useState(true);
   const [notes, setNotes] = useState("");
   const [startNow, setStartNow] = useState(true);
@@ -51,6 +56,7 @@ function NewInspectionForm() {
     e.preventDefault();
     if (!valid) return;
     const id = createInspection({ customerId, facilityId, date, inspectorIds, carryForward: carryForward && eqCount + roomCount > 0, notes });
+    if (primary && inspectorIds.includes(primary)) useStore.getState().setPrimaryThermographer(id, primary, { designate: true });
     toast("Inspection created");
     if (startNow && !activeId) begin(id);
     else router.push(`/inspections/${id}/entry`);
@@ -83,6 +89,16 @@ function NewInspectionForm() {
             </Field>
             <Field label="Inspection date *" htmlFor="ni-date"><Input id="ni-date" type="date" value={date} onChange={(e) => setDate(e.target.value)} /></Field>
             <div className="sm:col-span-2"><ThermographerPicker idPrefix="ni-th" value={inspectorIds} onChange={setInspectorIds} /></div>
+            {cloud && inspectorIds.length ? (
+              <div className="sm:col-span-2">
+                <Field label="Primary Thermographer" htmlFor="ni-primary" hint="Optional. Leave it to the field team, or designate one person (technicians then cannot change it).">
+                  <Select id="ni-primary" value={inspectorIds.includes(primary) ? primary : ""} onChange={(e) => setPrimary(e.target.value)} data-testid="new-primary">
+                    <option value="">Let the field team decide</option>
+                    {users.filter((u) => inspectorIds.includes(u.id)).map((u) => <option key={u.id} value={u.id}>{u.name}</option>)}
+                  </Select>
+                </Field>
+              </div>
+            ) : null}
             <Field label="Notes" className="sm:col-span-2" htmlFor="ni-notes"><Textarea id="ni-notes" value={notes} onChange={(e) => setNotes(e.target.value)} placeholder="Scope, contacts on site, special conditions" /></Field>
           </CardBody>
         </Card>

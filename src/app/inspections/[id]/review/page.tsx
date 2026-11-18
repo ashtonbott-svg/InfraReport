@@ -10,19 +10,20 @@ import { Badge } from "@/components/ui/badge";
 import { EmptyState } from "@/components/ui/misc";
 import { InspectionHeader } from "@/components/inspection/inspection-header";
 import { toast } from "@/components/ui/toast";
-import { useCustomers, useFacilities, useInspectionBundle, useOrganization } from "@/lib/store/hooks";
+import { useCustomers, useFacilities, useInspectionBundle, useOrganization, useUsers } from "@/lib/store/hooks";
 import { isInspectionLocked, useStore } from "@/lib/store/store";
 import { countBySeverity, type Severity } from "@/lib/domain/validation";
-import { GENERATOR_COLUMNS, GENERATOR_HEADERS, buildGeneratorRows, exportFileName, parseCsv, toCsv } from "@/lib/domain/csv";
+import { GENERATOR_COLUMNS, GENERATOR_COLUMN_COUNT, GENERATOR_HEADERS, IRT_COLUMN_COUNT, buildGeneratorRows, exportFileName, inspectionStartDate, parseCsv, toCsv } from "@/lib/domain/csv";
 import { downloadText } from "@/lib/download";
 import { cn } from "@/lib/cn";
-import { ExteriorCapture, useFieldState } from "@/components/field/exterior-photos";
+import { ExteriorAckButtons, ExteriorCapture, useFieldState } from "@/components/field/exterior-photos";
 import { buildingLabel } from "@/lib/domain/site-visit";
 import { useRole } from "@/lib/cloud/role";
 import { useSyncStatus } from "@/lib/sync/runtime";
 import { LastSynced } from "@/components/sync/sync-status";
 import { DownloadExcelButton, confirmSyncComplete } from "@/components/inspection/download-excel";
-import { ChangesSinceApproval } from "@/components/inspection/approval";
+import { ChangesSinceApproval, DeviceReports, SubmitControl, useDeviceReports } from "@/components/inspection/approval";
+import { primaryName } from "@/components/forms/primary-thermographer";
 
 const sevIcon: Record<Severity, React.ReactNode> = {
   error: <AlertCircle className="h-4 w-4 text-red-600" />,
@@ -38,11 +39,12 @@ export default function ReviewPage() {
   const customers = useCustomers();
   const facilities = useFacilities();
   const setStatus = useStore((s) => s.setInspectionStatus);
-  const logEvent = useStore((s) => s.logEvent);
   const [show, setShow] = useState<Severity | "all">("all");
   const field = useFieldState(id);
   const { isAdmin, cloud } = useRole();
   const sync = useSyncStatus();
+  const users = useUsers();
+  const reports = useDeviceReports(bundle?.dataset.inspection ?? ({ id, updatedAt: "", status: "Draft" } as never));
   const facilityId = bundle?.dataset.inspection.facilityId;
   const outstanding = useMemo(() => sync.ops.filter((o) => o.row.inspection_id === id || (o.table === "inspections" && o.id === id) || (facilityId && o.row.facility_id === facilityId)), [sync.ops, id, facilityId]);
   const syncIssues = outstanding.length + sync.conflictList.length;
@@ -62,10 +64,9 @@ export default function ReviewPage() {
     const csv = toCsv(rows, { includeBom });
     // Self-check: re-parse and confirm the structure before handing the file over.
     const parsed = parseCsv(csv);
-    const ok = parsed.length === rows.length + 1 && parsed.every((r) => r.length === 16) && parsed[0].join("|") === GENERATOR_HEADERS.join("|");
+    const ok = parsed.length === rows.length + 1 && parsed.every((r) => r.length === GENERATOR_COLUMN_COUNT) && parsed[0].join("|") === GENERATOR_HEADERS.join("|");
     if (!ok) { toast("CSV self-check failed. Export cancelled.", "error"); return; }
-    downloadText(exportFileName(customer, facility, inspection.date), csv);
-    logEvent(inspection.id, "Generator CSV exported", `${rows.length} rows, 16 columns${counts.error ? `, ${counts.error} unresolved errors` : ""}`);
+    downloadText(exportFileName(customer, facility, inspectionStartDate(dataset)), csv);
     toast(`Exported ${rows.length} rows`);
   };
 
@@ -80,7 +81,7 @@ export default function ReviewPage() {
       <div className="grid gap-6 xl:grid-cols-[minmax(0,1fr)_380px]">
         <div className="min-w-0 space-y-6">
           <Card>
-            <CardHeader title="Generator export" description={`Exact 16 column layout · ${rows.length} rows (one per thermal image) · Excel .xlsx with typed cells; CSV kept for compatibility`}
+            <CardHeader title="Generator export" description={`Infinite Infrared: ${GENERATOR_COLUMN_COUNT} columns · IRT: ${IRT_COLUMN_COUNT} columns · ${rows.length} rows (one per thermal image) · typed Excel cells; CSV kept for compatibility`}
               actions={<>
                 <DownloadExcelButton inspectionId={id} size="lg" disabled={rows.length === 0} data-testid="export-xlsx" />
                 <Button size="sm" variant="ghost" onClick={exportCsv} disabled={rows.length === 0}><Download className="h-3.5 w-3.5" />CSV (compatibility)</Button>
@@ -128,8 +129,9 @@ export default function ReviewPage() {
               )}
               {photoBlocked && field ? (
                 <div className="space-y-3 rounded-lg border border-amber-300 bg-amber-50 p-3">
-                  <div className="flex items-start gap-2 text-amber-900"><AlertTriangle className="mt-0.5 h-4 w-4 shrink-0" /><span><strong>Building exterior photo required</strong> before this inspection can go to review: {field.exit.missing.map(buildingLabel).join(", ")}.</span></div>
-                  <ExteriorCapture field={field} takeLabel="Take Photo" />
+                  <div className="flex items-start gap-2 text-amber-900"><AlertTriangle className="mt-0.5 h-4 w-4 shrink-0" /><span><strong>Front building photo</strong> still needs a decision before this inspection can go to review: {field.exit.missing.map(buildingLabel).join(", ")}.</span></div>
+                  <ExteriorCapture field={field} takeLabel="Take Front Photo" />
+                  {field.shared ? field.exit.missing.map((b) => <ExteriorAckButtons key={b} field={field} building={b} />) : null}
                 </div>
               ) : null}
               {cloud && syncIssues ? (
@@ -139,12 +141,18 @@ export default function ReviewPage() {
                 </div>
               ) : null}
               <div className="flex flex-wrap gap-2">
-                <Button disabled={inspection.status === "Needs Review" || photoBlocked || isInspectionLocked(inspection)} onClick={() => { if (setStatus(inspection.id, "Needs Review")) toast("Sent for review"); else toast("Building exterior photo required before review", "error"); }}>Submit for review</Button>
-                {isAdmin ? <Button variant="primary" disabled={counts.error > 0 || photoBlocked || isInspectionLocked(inspection) || inspection.status === "Approved"} onClick={() => { if (setStatus(inspection.id, "Approved", `${counts.warning} warnings acknowledged`)) toast("Inspection approved"); else toast("Building exterior photo required before approval", "error"); }}>
+                <SubmitControl inspection={inspection} disabled={photoBlocked || isInspectionLocked(inspection)} onBlocked={() => toast("Front building photo needs a decision first", "error")} />
+                {isAdmin ? <Button variant="primary" data-testid="approve" disabled={counts.error > 0 || photoBlocked || isInspectionLocked(inspection) || inspection.status === "Approved"} onClick={() => {
+                  const waiting = (reports ?? []).filter((r) => r.pending > 0 || r.failed > 0);
+                  if ((waiting.length || syncIssues) && !confirm(`Not everything is confirmed in the cloud:${syncIssues ? `\n• This device: ${outstanding.length} change(s) not uploaded, ${sync.conflictList.length} conflict(s)` : ""}${waiting.map((r) => `\n• Another phone reported ${r.pending} waiting, ${r.failed} failed (${new Date(r.reported_at).toLocaleString("en-US")})`).join("")}\n\nApprove anyway? Late changes will be refused once approved and stay on that phone for review.`)) return;
+                  if (setStatus(inspection.id, "Approved", `${counts.warning} warnings acknowledged`)) toast("Inspection approved"); else toast("Front building photo needs a decision before approval", "error");
+                }}>
                   <CheckCircle2 className="h-4 w-4" />{inspection.firstApprovedAt ? "Approve again" : "Approve"}
                 </Button> : null}
               </div>
-              {!isAdmin ? <p className="text-xs text-slate-500">After you submit, an administrator reviews and approves the inspection.</p> : null}
+              {!isAdmin ? <p className="text-xs text-slate-500">One submission is enough for everyone assigned. An administrator then reviews and approves it.</p> : null}
+              {isAdmin ? <DeviceReports rows={reports} /> : null}
+              {cloud ? <div className="text-xs text-slate-600" data-testid="review-primary">Primary Thermographer: <strong>{primaryName(inspection, users) ?? "not chosen"}</strong>{inspection.primaryLocked ? " (designated)" : ""}</div> : null}
               <p className="text-xs text-slate-500">Finished PDF report generation is not connected yet. It will be enabled only after your existing Generator is integrated and verified.</p>
             </CardBody>
           </Card>

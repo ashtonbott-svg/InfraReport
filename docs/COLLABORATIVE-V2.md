@@ -1,4 +1,6 @@
-# InfraReport V2: collaborative inspections, owner setup
+# InfraReport: collaborative inspections, owner setup
+
+For the production release and migration 5, see `docs/PRODUCTION-RELEASE.md`.
 
 This branch (`collaborative-v2`) adds shared cloud inspections. Production (`main`) is not changed by anything here.
 
@@ -9,6 +11,7 @@ This branch (`collaborative-v2`) adds shared cloud inspections. Production (`mai
 3. New query. Paste `supabase/migrations/20261118000200_admin_bootstrap.sql`, press **Run**.
 4. New query. Paste `supabase/migrations/20261118000300_event_received_at.sql`, press **Run**.
 5. New query. Paste `supabase/migrations/20261118000400_approval_lock.sql`, press **Run** (see Migration 4 below).
+6. New query. Paste `supabase/migrations/20261119000500_field_test_improvements.sql`, press **Run** (verification queries in `docs/PRODUCTION-RELEASE.md`, Step 1).
 
 Run them once each, in that order. Running the first file a second time fails on purpose (the tables already exist) and changes nothing.
 

@@ -61,6 +61,9 @@ export interface SyncData {
   orphans: Record<string, Row>;
   lastPushOkAt: number | null;
   lastPullOkAt: number | null;
+  /** Last unsent-change counts this device reported per inspection ("pending|failed"). */
+  reported?: Record<string, string>;
+  reportedAt?: number;
 }
 
 export function emptySyncData(userId: string, orgId: string): SyncData {

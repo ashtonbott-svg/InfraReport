@@ -8,7 +8,7 @@ const mono = JetBrains_Mono({ variable: "--font-jetbrains", subsets: ["latin"] }
 
 export const metadata: Metadata = {
   title: { default: "InfraReport", template: "%s · InfraReport" },
-  description: "Electrical infrared inspection management and reporting. Prototype build with fictional demonstration data.",
+  description: "Electrical infrared inspection management and reporting for Infinite Infrared.",
   robots: { index: false, follow: false },
   applicationName: "InfraReport",
   appleWebApp: { capable: true, title: "InfraReport", statusBarStyle: "black" },

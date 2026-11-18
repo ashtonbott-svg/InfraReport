@@ -3,7 +3,7 @@
 import Link from "next/link";
 import { Suspense, useCallback, useEffect, useMemo, useState, useSyncExternalStore } from "react";
 import { useParams, useSearchParams } from "next/navigation";
-import { AlertTriangle, Camera, ChevronDown, Filter, LayoutGrid, ListPlus, MapPin, Play, Plus, Rows3, Search, SlidersHorizontal, CheckCircle2 } from "lucide-react";
+import { AlertTriangle, ArrowUpDown, Camera, ChevronDown, Filter, LayoutGrid, ListPlus, MapPin, Play, Plus, Rows3, Search, SlidersHorizontal, CheckCircle2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
 import { Input, Select } from "@/components/ui/field";
@@ -14,12 +14,13 @@ import { RoomConditionsCard, RoomRail, type RoomEntry } from "@/components/inspe
 import { EquipmentGrid, QuickAddBar, type GridRow } from "@/components/inspection/equipment-grid";
 import { AddRoomSheet, RoomConditionsSheet, RoomPickerSheet, conditionSummary } from "@/components/field/room-sheets";
 import { EquipmentSheet, nameSuggestions } from "@/components/field/equipment-sheet";
+import { ReorderSheet } from "@/components/field/reorder-sheet";
 import { ExteriorReminder, useFieldState } from "@/components/field/exterior-photos";
 import { SaveIndicator } from "@/components/field/save-indicator";
 import { toast } from "@/components/ui/toast";
 import { cn } from "@/lib/cn";
 import { useAllowedCauses, useEquipment, useInspectionBundle, useLocations } from "@/lib/store/hooks";
-import { useStore } from "@/lib/store/store";
+import { isInspectionLocked, useStore } from "@/lib/store/store";
 import { useFieldUi } from "@/lib/store/field-ui";
 import { useBeginFieldWork } from "@/lib/store/field-actions";
 import { useKeyboardOpen } from "@/lib/use-viewport";
@@ -149,7 +150,8 @@ function EntryWorkspace() {
   const [q, setQ] = useState("");
   const [filter, setFilter] = useState<RowFilter>("all");
   const [showFilters, setShowFilters] = useState(false);
-  const [sheet, setSheet] = useState<null | "add-room" | "pick-room" | "conditions" | "add-eq" | "edit-eq" | "checkpoint">(null);
+  const [sheet, setSheet] = useState<null | "add-room" | "pick-room" | "conditions" | "add-eq" | "edit-eq" | "checkpoint" | "reorder">(null);
+  const [insertAfter, setInsertAfter] = useState<string | null>(null);
   const [editId, setEditId] = useState<string | null>(null);
 
   const rooms: RoomEntry[] = useMemo(() => {
@@ -257,7 +259,7 @@ function EntryWorkspace() {
     const st = useStore.getState();
     const missing = st.exitCheck(inspection.id).missing;
     // Prompt only when this room introduces a building that needs its own photo.
-    if (isActive && !field.optional && !wasRequired && missing.includes(building) && field.exit.allowed) setTimeout(() => openExterior("start"), 250);
+    if (isActive && !wasRequired && missing.includes(building) && field.exit.allowed) setTimeout(() => openExterior("start"), 250);
   };
   const addExistingRoom = (locId: string) => {
     addRoomToInspection(inspection.id, locId);
@@ -297,11 +299,16 @@ function EntryWorkspace() {
         onSelect={(l) => { selectRoom(l); setSheet(null); }} onAddRoom={() => setSheet("add-room")} otherRooms={otherRooms} onAddExisting={addExistingRoom} />
       <RoomConditionsSheet open={sheet === "conditions"} onClose={() => setSheet(null)} info={current} inspectionDate={inspection.date} knownBuildings={field.knownBuildings} />
       {sheet === "add-eq" || sheet === "edit-eq" ? (
-        <EquipmentSheet open mode={sheet === "add-eq" ? "create" : "edit"} onClose={() => setSheet(null)} inspection={inspection}
+        <EquipmentSheet open mode={sheet === "add-eq" ? "create" : "edit"} onClose={() => { setSheet(null); setInsertAfter(null); }} inspection={inspection}
+          afterResultId={sheet === "add-eq" ? insertAfter : null}
+          onAddAfter={(rid) => { const loc = dataset.results.find((x) => x.id === rid)?.locationId; if (loc && loc !== selected) selectRoom(loc); setInsertAfter(rid); setSheet("add-eq"); }}
           locationId={current?.location.id ?? null} room={current?.room ?? (editId ? dataset.rooms.find((x) => x.locationId === dataset.results.find((r) => r.id === editId)?.locationId) : undefined)}
           rows={gridRows} editId={editId} onNavigate={(rid) => setEditId(rid)} defaults={createDefaults} suggestions={suggestions}
           facilityNames={facilityNames} roomName={current?.location.name}
           onEndOfRoom={selected !== "all" && !filtered ? () => setSheet("checkpoint") : undefined} />
+      ) : null}
+      {current && sheet === "reorder" ? (
+        <ReorderSheet open onClose={() => setSheet(null)} sample={{ inspectionId: inspection.id, locationId: current.location.id }} equipment={eqMap} roomName={current.location.name} />
       ) : null}
       {current && sheet === "checkpoint" ? (
         <RoomCheckpoint open onClose={() => setSheet(null)} room={current.room} location={current.location} items={checkpointItems} nextRoom={nextRoom?.location ?? null}
@@ -389,6 +396,9 @@ function EntryWorkspace() {
                 </div>
               ) : null}
 
+              {current && roomResults.length > 1 && !filtered && !isInspectionLocked(inspection) ? (
+                <div className="flex justify-end"><Button size="sm" className="h-9" onClick={() => setSheet("reorder")} data-testid="reorder-open"><ArrowUpDown className="h-4 w-4" />Reorder Equipment</Button></div>
+              ) : null}
               {gridRows.length === 0 ? (
                 <div className="rounded-xl border border-dashed border-slate-300 px-4 py-8 text-center text-sm text-slate-500">
                   {filtered ? "No equipment matches." : "No equipment in this room yet. Tap Add Equipment below."}

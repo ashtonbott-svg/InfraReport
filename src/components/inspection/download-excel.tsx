@@ -8,7 +8,8 @@ import { inspectorNames } from "@/components/forms/thermographer-picker";
 import { exportInspectionXlsx } from "@/lib/export-excel";
 import { useStore } from "@/lib/store/store";
 import { syncNow, useSyncStatus } from "@/lib/sync/runtime";
-import type { ExportDataset } from "@/lib/domain/csv";
+import { withApprovalSnapshot, type ExportDataset, type ExportFormat } from "@/lib/domain/csv";
+import { Modal } from "@/components/ui/modal";
 
 /**
  * Before a file leaves the app: fetch the latest from the cloud and say plainly
@@ -37,47 +38,71 @@ export function inspectionDataset(inspectionId: string): ExportDataset | null {
   const inspection = s.inspections.find((i) => i.id === inspectionId);
   if (!inspection) return null;
   const org = inspection.organizationId;
-  return {
+  return withApprovalSnapshot({
     inspection,
     results: s.results.filter((r) => r.inspectionId === inspectionId),
     equipment: new Map(s.equipment.filter((e) => e.organizationId === org).map((e) => [e.id, e])),
     locations: new Map(s.locations.filter((l) => l.organizationId === org).map((l) => [l.id, l])),
     rooms: s.rooms.filter((r) => r.inspectionId === inspectionId),
-  };
+  });
+}
+
+export const FORMAT_LABEL: Record<ExportFormat, string> = { infinite: "Infinite Infrared Excel (.xlsx)", irt: "IRT Excel (.xlsx)" };
+
+/** Build and download one workbook. Read only: nothing about the inspection is changed or logged. */
+export async function downloadInspectionExcel(inspectionId: string, format: ExportFormat): Promise<number | null> {
+  if (!(await confirmSyncComplete(inspectionId))) return null;
+  const ds = inspectionDataset(inspectionId);
+  if (!ds) { toast("Inspection not found on this device", "error"); return null; }
+  const s = useStore.getState();
+  return exportInspectionXlsx(ds, {
+    customer: s.customers.find((c) => c.id === ds.inspection.customerId)?.name ?? "Customer",
+    facility: s.facilities.find((f) => f.id === ds.inspection.facilityId)?.name ?? "Facility",
+    inspectionDate: ds.inspection.date,
+    thermographers: inspectorNames(ds.inspection.inspectorIds, s.users.filter((u) => u.organizationId === ds.inspection.organizationId)),
+  }, format);
 }
 
 /**
- * Download Excel (.xlsx): the existing 16 column Generator format (Generator Import,
- * Equipment Summary, Column Map), one row per thermal image entry. Available in any
- * status, before and after approval.
+ * Download Excel: choose Infinite Infrared (15 columns, Generator Import +
+ * Equipment Summary + Column Map) or IRT (14 columns, one Data sheet). Same
+ * data, one row per thermal image entry. Available in every status.
  */
-export function DownloadExcelButton({ inspectionId, label = "Download Excel (.xlsx)", ...props }: { inspectionId: string; label?: string } & Omit<ButtonProps, "onClick">) {
-  const [busy, setBusy] = useState(false);
-  const download = async () => {
+export function DownloadExcelButton({ inspectionId, label = "Download Excel", ...props }: { inspectionId: string; label?: string } & Omit<ButtonProps, "onClick">) {
+  const [open, setOpen] = useState(false);
+  const [busy, setBusy] = useState<ExportFormat | null>(null);
+  const testId = (props as { "data-testid"?: string })["data-testid"] ?? "download-xlsx";
+  const go = async (format: ExportFormat) => {
     if (busy) return;
-    setBusy(true);
+    setBusy(format);
     try {
-      if (!(await confirmSyncComplete(inspectionId))) return;
-      const ds = inspectionDataset(inspectionId);
-      if (!ds) { toast("Inspection not found on this device", "error"); return; }
-      const s = useStore.getState();
-      const n = await exportInspectionXlsx(ds, {
-        customer: s.customers.find((c) => c.id === ds.inspection.customerId)?.name ?? "Customer",
-        facility: s.facilities.find((f) => f.id === ds.inspection.facilityId)?.name ?? "Facility",
-        inspectionDate: ds.inspection.date,
-        thermographers: inspectorNames(ds.inspection.inspectorIds, s.users.filter((u) => u.organizationId === ds.inspection.organizationId)),
-      });
-      s.logEvent(inspectionId, "Excel workbook exported", `${n} Generator rows (one per thermal image), 16 columns, status ${ds.inspection.status}`);
-      toast(`Excel downloaded: ${n} rows`);
+      const n = await downloadInspectionExcel(inspectionId, format);
+      if (n !== null) { toast(`${FORMAT_LABEL[format]} downloaded: ${n} rows`); setOpen(false); }
     } catch (e) {
       toast(e instanceof Error ? `Excel export failed: ${e.message}` : "Excel export failed", "error");
     } finally {
-      setBusy(false);
+      setBusy(null);
     }
   };
   return (
-    <Button variant="primary" {...props} onClick={() => void download()} disabled={busy || props.disabled}>
-      <FileSpreadsheet className="h-4 w-4" />{busy ? "Preparing…" : label}
-    </Button>
+    <>
+      <Button variant="primary" {...props} onClick={() => setOpen(true)}>
+        <FileSpreadsheet className="h-4 w-4" />{label}
+      </Button>
+      <Modal open={open} onClose={() => setOpen(false)} title="Download Excel" description="Same inspection data, two layouts. Downloading does not change the inspection.">
+        <div className="grid gap-3">
+          <button type="button" onClick={() => void go("infinite")} disabled={!!busy} data-testid={`${testId}-infinite`}
+            className="rounded-xl border-2 border-thermal-500 bg-thermal-50 p-4 text-left hover:bg-thermal-100 disabled:opacity-60">
+            <span className="block text-base font-semibold text-slate-900">{busy === "infinite" ? "Preparing…" : FORMAT_LABEL.infinite}</span>
+            <span className="text-sm text-slate-600">15 columns for your Generator, with Max Temp. Generator Import, Equipment Summary and Column Map sheets.</span>
+          </button>
+          <button type="button" onClick={() => void go("irt")} disabled={!!busy} data-testid={`${testId}-irt`}
+            className="rounded-xl border border-slate-300 bg-white p-4 text-left hover:bg-slate-50 disabled:opacity-60">
+            <span className="block text-base font-semibold text-slate-900">{busy === "irt" ? "Preparing…" : FORMAT_LABEL.irt}</span>
+            <span className="text-sm text-slate-600">14 columns for Infrared Team, no Max Temp. One Data sheet, no branding.</span>
+          </button>
+        </div>
+      </Modal>
+    </>
   );
 }

@@ -2,13 +2,14 @@
 
 import { useMemo } from "react";
 import Link from "next/link";
-import { CalendarDays, MapPin, Play, Users } from "lucide-react";
+import { CalendarDays, Camera, MapPin, Play, Users } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { StatusBadge } from "@/components/ui/badge";
 import { useCustomers, useFacilities, useInspections, useResults, useRooms, useUsers } from "@/lib/store/hooks";
 import { useBeginFieldWork } from "@/lib/store/field-actions";
 import { roomProgress } from "@/lib/domain/thermal";
 import { inspectorNames } from "@/components/forms/thermographer-picker";
+import { primaryName } from "@/components/forms/primary-thermographer";
 import { formatDate, todayISO } from "@/lib/format";
 import type { Inspection } from "@/lib/domain/types";
 import { DownloadExcelButton } from "@/components/inspection/download-excel";
@@ -76,6 +77,7 @@ export function JobBoard({ onlyUserId, groups = ["active", "upcoming", "submitte
                     {c.address ? <div className="flex items-center gap-1.5"><MapPin className="h-3.5 w-3.5 shrink-0 text-slate-400" /><span className="truncate">{c.address}</span></div> : null}
                     <div className="flex items-center gap-1.5"><CalendarDays className="h-3.5 w-3.5 shrink-0 text-slate-400" />{formatDate(c.i.date)}</div>
                     <div className="flex items-center gap-1.5"><Users className="h-3.5 w-3.5 shrink-0 text-slate-400" /><span className="truncate">{inspectorNames(c.i.inspectorIds, users)}</span></div>
+                    {c.i.primaryThermographerId ? <div className="flex items-center gap-1.5" data-testid="job-primary"><Camera className="h-3.5 w-3.5 shrink-0 text-slate-400" /><span className="truncate">Primary: {primaryName(c.i, users) ?? "Unknown"}</span></div> : null}
                   </div>
                   <div className="mt-3">
                     <div className="flex justify-between text-[11px] text-slate-500"><span>{c.eqDone} of {c.eqTotal} equipment</span><span>{c.roomsDone} of {c.roomsTotal} rooms finished</span></div>

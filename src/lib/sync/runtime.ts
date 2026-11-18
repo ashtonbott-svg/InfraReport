@@ -70,6 +70,7 @@ export function startSync(userId: string, orgId: string) {
     storage: localStore,
     online: () => (typeof navigator === "undefined" ? true : navigator.onLine),
     onChange: publish,
+    deviceId: deviceId(),
   }, userId, orgId);
   unsub = useStore.subscribe((state) => {
     if (!engine) return;
@@ -89,6 +90,16 @@ export function startSync(userId: string, orgId: string) {
 }
 
 const LAST_USER_KEY = "infrareport-cloud-last-user";
+
+/** A random id for this browser (not personal data), so administrators can tell phones apart. */
+function deviceId(): string {
+  let id = localStore.get("infrareport-device-id");
+  if (!id) {
+    id = typeof crypto !== "undefined" && "randomUUID" in crypto ? crypto.randomUUID() : Math.random().toString(36).slice(2);
+    localStore.set("infrareport-device-id", id);
+  }
+  return id;
+}
 
 /**
  * A different person signing in on this phone must not see the previous

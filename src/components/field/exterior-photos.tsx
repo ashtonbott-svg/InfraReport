@@ -11,12 +11,13 @@ import { PhotoCapture } from "./photo-capture";
 import { cn } from "@/lib/cn";
 import { useStore } from "@/lib/store/store";
 import { useCustomers, useFacilities, useInspections, useLocations, useResults, useRooms } from "@/lib/store/hooks";
-import { ANY_BUILDING, buildingLabel, checkExit, exteriorPhotoOptional, exteriorPhotosFor, requiredBuildings } from "@/lib/domain/site-visit";
+import { ANY_BUILDING, buildingLabel, checkExit, checkFor, exteriorPhotosFor, isSharedInspection, requiredBuildings } from "@/lib/domain/site-visit";
+import { useSession } from "@/lib/cloud/session";
 import { persistPhoto } from "@/lib/photos/capture";
 import { deletePhotoBlob } from "@/lib/photos/photo-db";
 import { usePhotoUrl } from "@/lib/photos/use-photo-url";
 import { formatDateTime } from "@/lib/format";
-import type { Photo } from "@/lib/domain/types";
+import type { ExteriorCheck, Photo } from "@/lib/domain/types";
 
 /** Everything the field workflow needs to know about one inspection. */
 export function useFieldState(inspectionId: string | null) {
@@ -27,6 +28,7 @@ export function useFieldState(inspectionId: string | null) {
   const locations = useLocations();
   const results = useResults();
   const photos = useStore((s) => s.photos);
+  const allChecks = useStore((s) => s.exteriorChecks);
   return useMemo(() => {
     const inspection = inspections.find((i) => i.id === inspectionId);
     if (!inspection) return null;
@@ -35,17 +37,18 @@ export function useFieldState(inspectionId: string | null) {
     const locMap = new Map(locations.map((l) => [l.id, l]));
     const inspRooms = rooms.filter((r) => r.inspectionId === inspection.id);
     const required = requiredBuildings(inspRooms, locMap);
-    const optional = exteriorPhotoOptional(inspection);
-    const exit = checkExit(required, photos, inspection.id, optional);
+    const shared = isSharedInspection(inspection);
+    const checks = (allChecks ?? []).filter((c) => c.inspectionId === inspection.id);
+    const exit = checkExit(required, photos, inspection.id, checks);
     const exterior = exteriorPhotosFor(photos, inspection.id).sort((a, b) => a.savedAt.localeCompare(b.savedAt));
     const lastRoom = inspection.siteVisit.lastActiveLocationId ? locMap.get(inspection.siteVisit.lastActiveLocationId) : undefined;
     const knownBuildings = [...new Set(locations.filter((l) => l.facilityId === inspection.facilityId).map((l) => l.building.trim()).filter(Boolean))].sort();
     return {
-      inspection, facility, customer, required, exit, exterior, lastRoom, knownBuildings, optional,
+      inspection, facility, customer, required, exit, exterior, lastRoom, knownBuildings, shared, checks,
       roomCount: inspRooms.length,
       equipmentCount: results.filter((r) => r.inspectionId === inspection.id).length,
     };
-  }, [inspections, customers, facilities, rooms, locations, results, photos, inspectionId]);
+  }, [inspections, customers, facilities, rooms, locations, results, photos, allChecks, inspectionId]);
 }
 
 export type FieldState = NonNullable<ReturnType<typeof useFieldState>>;
@@ -88,6 +91,29 @@ export function ExteriorCapture({ field, takeLabel, onSaved, autoOpen }: { field
   );
 }
 
+function CheckLabel({ check }: { check: ExteriorCheck }) {
+  const members = useSession((s) => s.members);
+  const who = members.find((m) => m.userId === check.acknowledgedBy)?.name ?? "a teammate";
+  const what = check.status === "photo" ? "Photo taken on a phone" : check.status === "camera" ? "Taken with the camera" : `Exception: ${check.note}`;
+  return <span data-testid="exterior-ack">{what} · {who}, {formatDateTime(check.acknowledgedAt)}</span>;
+}
+
+/** Shared inspections: confirm the photo without a phone photo, or document why it could not be taken. */
+export function ExteriorAckButtons({ field, building, onDone }: { field: FieldState; building: string; onDone?: () => void }) {
+  const ack = useStore((s) => s.acknowledgeExterior);
+  return (
+    <div className="mt-2 grid grid-cols-2 gap-2">
+      <Button size="sm" className="h-10 justify-center" data-testid="ack-camera" onClick={() => { if (ack(field.inspection.id, building, "camera")) { toast("Recorded: taken with the camera"); onDone?.(); } }}>Already Taken With Camera</Button>
+      <Button size="sm" variant="ghost" className="h-10 justify-center" data-testid="ack-exception" onClick={() => {
+        const note = prompt(`Why can't the front photo of ${buildingLabel(building)} be taken?`);
+        if (note === null) return;
+        if (!note.trim()) { toast("Please describe why", "error"); return; }
+        if (ack(field.inspection.id, building, "exception", note)) { toast("Exception recorded"); onDone?.(); }
+      }}>Can&apos;t Take Photo…</Button>
+    </div>
+  );
+}
+
 /** Per-building checklist with thumbnails and building reassignment. */
 export function ExteriorChecklist({ field, editable = true }: { field: FieldState; editable?: boolean }) {
   const setPhotoBuilding = useStore((s) => s.setPhotoBuilding);
@@ -105,11 +131,16 @@ export function ExteriorChecklist({ field, editable = true }: { field: FieldStat
       <ul className="space-y-1.5">
         {reqs.map((b) => {
           const missing = field.exit.missing.includes(b);
+          const onPhone = b === ANY_BUILDING ? field.exterior.length > 0 : field.exterior.some((p) => p.building.trim() === b);
+          const check = checkFor(field.required, b, field.checks, field.inspection.id);
           return (
-            <li key={b} className={cn("flex items-center gap-2 rounded-lg px-3 py-2 text-sm", missing ? "bg-amber-50 text-amber-900" : "bg-emerald-50 text-emerald-900")}>
-              {missing ? <AlertTriangle className="h-4 w-4 shrink-0" /> : <CheckCircle2 className="h-4 w-4 shrink-0" />}
-              <span className="font-medium">{buildingLabel(b)}</span>
-              <span className="ml-auto text-xs">{missing ? (field.optional ? "Optional" : "Photo required") : "Photo saved"}</span>
+            <li key={b} className={cn("rounded-lg px-3 py-2 text-sm", missing ? "bg-amber-50 text-amber-900" : "bg-emerald-50 text-emerald-900")} data-testid="exterior-building">
+              <div className="flex items-center gap-2">
+                {missing ? <AlertTriangle className="h-4 w-4 shrink-0" /> : <CheckCircle2 className="h-4 w-4 shrink-0" />}
+                <span className="font-medium">{buildingLabel(b)}</span>
+                <span className="ml-auto text-right text-xs">{missing ? "Front photo needed" : onPhone ? "Photo saved on this phone" : <CheckLabel check={check!} />}</span>
+              </div>
+              {missing && field.shared ? <ExteriorAckButtons field={field} building={b} /> : null}
             </li>
           );
         })}
@@ -147,17 +178,27 @@ export function ExteriorPhotoSheet({ open, mode, field, onClose, onSkip }: {
   const start = mode === "start";
   return (
     <Sheet open={open} onClose={start ? () => onSkip?.() : onClose} dismissible={!start}
-      title={start ? "Building Exterior Photo" : "Building exterior photos"}
-      subtitle={start ? "Take a photo of the front of the building before beginning your inspection." : `${field.facility?.name ?? ""}: one saved photo is required per building.`}
+      title={start ? "Front Building Photo" : "Front building photos"}
+      subtitle={start ? "Take a photo of the front of the building for the report." : `${field.facility?.name ?? ""}: one front photo per building.${field.shared ? " Either phone, or the inspection camera, can cover it." : ""}`}
       footer={start ? (
-        <Button size="lg" className="h-12 w-full justify-center text-base" onClick={onSkip}>Skip for Now</Button>
+        <Button size="lg" className="h-12 w-full justify-center text-base" onClick={onSkip} data-testid="remind-later">Remind Me Later</Button>
       ) : (
         <Button size="lg" className="h-12 w-full justify-center text-base" onClick={onClose}>Done</Button>
       )}>
       <div className="space-y-4">
         {!start || field.exterior.length ? <ExteriorChecklist field={field} /> : null}
-        <ExteriorCapture field={field} takeLabel={start ? "Take Photo" : field.exit.allowed ? "Add Another Photo" : "Take Photo Now"} onSaved={start ? onClose : undefined} />
-        <p className="text-xs text-slate-500">Photos are saved only on this device (IndexedDB) until secure cloud storage is connected.</p>
+        <ExteriorCapture field={field} takeLabel={start ? "Take Front Photo" : field.exit.allowed ? "Add Another Photo" : "Take Front Photo"} onSaved={start ? onClose : undefined} />
+        {start && field.shared && field.exit.missing.length ? (
+          <div className="space-y-2">
+            {field.exit.missing.map((b) => (
+              <div key={b}>
+                {field.exit.missing.length > 1 ? <div className="text-xs font-medium text-slate-600">{buildingLabel(b)}</div> : null}
+                <ExteriorAckButtons field={field} building={b} onDone={field.exit.missing.length === 1 ? onClose : undefined} />
+              </div>
+            ))}
+          </div>
+        ) : null}
+        <p className="text-xs text-slate-500">Photos are saved only on the phone that took them. They are not uploaded or backed up yet.</p>
       </div>
     </Sheet>
   );
@@ -179,8 +220,8 @@ export function ExitCheckpoint({ open, field, onClose, onExited }: { open: boole
     onExited(kind);
   };
   return (
-    <Sheet open={open} onClose={onClose} title={blocked ? "Building Exterior Photo Required" : "Leave this inspection?"}
-      subtitle={blocked ? "Before leaving this site, please take or upload a photograph of the building exterior." : `${field.facility?.name}: ${field.equipmentCount} equipment items in ${field.roomCount} rooms. All changes are saved on this device.`}
+    <Sheet open={open} onClose={onClose} title={blocked ? "Front Building Photo" : "Leave this inspection?"}
+      subtitle={blocked ? (field.shared ? "Before leaving: take the front photo, confirm it was taken with the inspection camera, or note why it can't be taken." : "Before leaving this site, please take or upload a photograph of the building exterior.") : `${field.facility?.name}: ${field.equipmentCount} equipment items in ${field.roomCount} rooms. All changes are saved on this device.`}
       footer={
         <div className="grid gap-2 sm:grid-cols-2">
           <Button size="lg" className="h-12 justify-center text-base" disabled={blocked} onClick={() => doExit("paused")}><PauseCircle className="h-5 w-5" />Pause and Return Later</Button>

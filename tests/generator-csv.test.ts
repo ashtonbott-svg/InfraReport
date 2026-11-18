@@ -10,7 +10,7 @@ import type { Equipment, Inspection, InspectionResult, InspectionRoomConditions,
 
 const EXPECTED = [
   "Image Date", "Location", "Humidity", "Background Temp", "Equipment", "Component", "Distance", "Possible Cause",
-  "IR Image Number", "Visual Image Number", "Emissivity", "Max Temp", "Ambient Temp", "Opened", "Confidence", "Review Notes",
+  "IR Image Number", "Visual Image Number", "Emissivity", "Max Temp", "Ambient Temp", "Opened", "Review Notes",
 ];
 
 const insp: Inspection = { id: "i1", organizationId: "o", customerId: "c", facilityId: "f", date: "2026-03-10", inspectorIds: ["u"], status: "In Progress", defaultEmissivity: DEFAULT_EMISSIVITY, notes: "", createdAt: "", updatedAt: "", siteVisit: newSiteVisit() };
@@ -38,16 +38,16 @@ function dataset(results: InspectionResult[], equipment: Equipment[]): ExportDat
 }
 
 describe("Generator column layout", () => {
-  it("has exactly 16 headers in the required order", () => {
+  it("has exactly 15 headers in the required order (Confidence removed)", () => {
     expect(GENERATOR_HEADERS).toEqual(EXPECTED);
-    expect(GENERATOR_HEADERS).toHaveLength(16);
+    expect(GENERATOR_HEADERS).toHaveLength(15);
   });
   it("maps to the Generator Excel columns and never to O, P or Q", () => {
     const map = Object.fromEntries(GENERATOR_COLUMNS.map((c) => [c.header, c.excelColumn]));
     expect(map).toEqual({
       "Image Date": "B", Location: "C", Humidity: "D", "Background Temp": "E", Equipment: "F", Component: "G", Distance: "H",
       "Possible Cause": "I", "IR Image Number": "J", "Visual Image Number": "K", Emissivity: "L", "Max Temp": "M", "Ambient Temp": "N",
-      Opened: "R", Confidence: null, "Review Notes": null,
+      Opened: "R", "Review Notes": null,
     });
     const cols = GENERATOR_COLUMNS.map((c) => c.excelColumn);
     for (const forbidden of ["O", "P", "Q"]) expect(cols).not.toContain(forbidden);
@@ -68,10 +68,10 @@ describe("CSV export", () => {
   const csv = toCsv(rows, { includeBom: true });
   const parsed = parseCsv(csv);
 
-  it("round-trips: header + one line per equipment record, 16 fields each", () => {
+  it("round-trips: header + one line per equipment record, 15 fields each", () => {
     expect(parsed[0]).toEqual(EXPECTED);
     expect(parsed).toHaveLength(results.length + 1);
-    for (const r of parsed) expect(r).toHaveLength(16);
+    for (const r of parsed) expect(r).toHaveLength(15);
   });
   it("starts with a UTF-8 BOM and uses CRLF", () => {
     expect(csv.charCodeAt(0)).toBe(0xfeff);
@@ -82,7 +82,7 @@ describe("CSV export", () => {
     expect(row).toEqual({
       "Image Date": "03/10/2026", Location: "Electrical Room 1", Humidity: "45", "Background Temp": "73", Equipment: "Panel P2",
       Component: "Circuit 11", Distance: "4", "Possible Cause": "Loose Connection(s)", "IR Image Number": "1023", "Visual Image Number": "1024",
-      Emissivity: "0.95", "Max Temp": "131.7", "Ambient Temp": "74", Opened: "Yes, Completely", Confidence: "", "Review Notes": 'Lug "hot", re-torque',
+      Emissivity: "0.95", "Max Temp": "131.7", "Ambient Temp": "74", Opened: "Yes, Completely", "Review Notes": 'Lug "hot", re-torque',
     });
   });
   it("applies row overrides without touching other rows", () => {
@@ -114,9 +114,9 @@ describe("CSV export", () => {
     const rs = OPENED_VALUES.map((o, i) => res(`o${i}`, { opened: o }));
     const out = parseCsv(toCsv(buildGeneratorRows(dataset(rs, eqs))));
     expect(out.slice(1).map((r) => r[13])).toEqual([...OPENED_VALUES]);
-    expect(out.slice(1).every((r) => r.length === 16)).toBe(true);
+    expect(out.slice(1).every((r) => r.length === 15)).toBe(true);
   });
-  it("rejects a row that is not 16 fields", () => {
+  it("rejects a row that is not 15 fields", () => {
     expect(() => toCsv([["a", "b"]])).toThrow();
   });
   it("escapes commas, quotes and newlines", () => {

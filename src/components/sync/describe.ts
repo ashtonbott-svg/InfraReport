@@ -4,7 +4,7 @@ import { locationLabel } from "@/lib/domain/csv";
 
 const TABLE_LABEL: Record<TableName, string> = {
   customers: "Customer", facilities: "Facility", locations: "Room", equipment: "Equipment", inspections: "Inspection",
-  inspection_assignments: "Assignment", room_conditions: "Room conditions", results: "Equipment line", thermal_images: "Thermal image", review_events: "History entry",
+  inspection_assignments: "Assignment", room_conditions: "Room conditions", results: "Equipment line", thermal_images: "Thermal image", review_events: "History entry", exterior_checks: "Front photo reminder",
 };
 
 const FIELD_LABEL: Record<string, string> = {

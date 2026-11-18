@@ -29,6 +29,8 @@ import type {
   Customer,
   DocumentAsset,
   Equipment,
+  ExteriorCheck,
+  ExteriorCheckStatus,
   Facility,
   ID,
   ImageAsset,
@@ -47,7 +49,7 @@ import type {
   User,
 } from "../domain/types";
 import { DEFAULT_ORG_ID as DEMO_ORG_ID, ASHTON_ID, LEGACY_DEMO_IDS, THERMOGRAPHERS, buildSeed } from "./seed";
-import { checkExit, exteriorPhotoOptional, newSiteVisit, requiredBuildings, type ExitCheck } from "../domain/site-visit";
+import { checkExit, exteriorCheckId, newSiteVisit, requiredBuildings, type ExitCheck } from "../domain/site-visit";
 import { checkRoom, newThermalImage, patchThermalImage } from "../domain/thermal";
 import { trackedLocalStorage } from "./save-status";
 
@@ -85,6 +87,8 @@ export interface DataState {
   reviewEvents: ReviewEvent[];
   /** Photo metadata only. Binaries live in IndexedDB (see lib/photos/photo-db). */
   photos: Photo[];
+  /** Front-of-building acknowledgments (shared inspections; synced). */
+  exteriorChecks: ExteriorCheck[];
   /** The inspection currently being worked on site, if any. */
   activeInspectionId: ID | null;
 }
@@ -103,6 +107,8 @@ export interface NewEquipmentRow {
   possibleCause?: string;
   problemNotes?: string;
   distance?: string | null;
+  /** Insert directly after this equipment line in the same room (instead of at the end). */
+  afterResultId?: string;
 }
 
 export interface Actions {
@@ -129,6 +135,12 @@ export interface Actions {
   updateInspection(id: ID, patch: Partial<Inspection>): void;
   /** Returns false (and changes nothing) when the transition is blocked. */
   setInspectionStatus(id: ID, status: InspectionStatus, detail?: string): boolean;
+  /**
+   * Primary Thermographer (responsible for the camera and photographs). `designate`
+   * = administrator decision (technicians cannot change it); otherwise a field
+   * choice, refused when an administrator already designated someone.
+   */
+  setPrimaryThermographer(inspectionId: ID, userId: ID | null, opts?: { designate?: boolean }): boolean;
   /** Administrator: unlock an approved shared inspection for corrections. It must be approved again. */
   reopenInspection(id: ID, reason: string): boolean;
   exitCheck(inspectionId: ID): ExitCheck;
@@ -137,6 +149,8 @@ export interface Actions {
   finishSiteVisit(inspectionId: ID): ExitCheck;
   skipExteriorPrompt(inspectionId: ID): void;
   setLastActiveRoom(inspectionId: ID, locationId: ID): void;
+  /** Record that a building's front photo was taken (photo / camera) or could not be (exception, with a note). */
+  acknowledgeExterior(inspectionId: ID, building: string, status: ExteriorCheckStatus, note?: string): boolean;
   /** Call only after the binary has been verified in IndexedDB. */
   addPhotoRecord(photo: Omit<Photo, "organizationId" | "savedAt">): void;
   removePhotoRecord(id: ID): void;
@@ -151,6 +165,12 @@ export interface Actions {
   updateResult(id: ID, patch: Partial<InspectionResult>): void;
   setOverride(id: ID, key: keyof ResultOverrides, value: string | null): void;
   duplicateResult(id: ID): ID | null;
+  /**
+   * Move an equipment line within its room: up, down, or directly after another
+   * line (null = to the top). Changes only this line's position (one record),
+   * so two phones reordering different items cannot overwrite each other.
+   */
+  moveResult(id: ID, to: "up" | "down" | { after: ID | null }): boolean;
   /** Add a thermal image entry to a result; returns the new image id. */
   addThermalImage(resultId: ID, partial?: Partial<ThermalImage>): ID;
   updateThermalImage(resultId: ID, imageId: ID, patch: Partial<ThermalImage>): void;
@@ -192,6 +212,7 @@ function initialState(): DataState {
     images: [],
     documents: [],
     photos: [],
+    exteriorChecks: [],
     activeInspectionId: null,
   };
 }
@@ -251,6 +272,7 @@ export const storeInitializer: StateCreator<Store> = (set, get) => {
             images: s.images.filter((i) => !insp.has(i.inspectionId)),
             documents: s.documents.filter((d) => !d.inspectionId || !insp.has(d.inspectionId)),
             reviewEvents: s.reviewEvents.filter((e) => !insp.has(e.inspectionId)),
+            exteriorChecks: (s.exteriorChecks ?? []).filter((c) => !insp.has(c.inspectionId)),
             activeInspectionId: plan.activeInspectionId ? null : s.activeInspectionId,
           });
           return plan;
@@ -327,7 +349,13 @@ export const storeInitializer: StateCreator<Store> = (set, get) => {
         },
         updateInspection(id, patch) {
           if (Object.keys(patch).some((k) => k !== "inspectorIds") && lockedInsp(id)) return;
-          set((s) => ({ inspections: s.inspections.map((i) => (i.id === id ? { ...i, ...normalizePatch(patch), id, updatedAt: now() } : i)) }));
+          set((s) => ({ inspections: s.inspections.map((i) => {
+            if (i.id !== id) return i;
+            const next = { ...i, ...normalizePatch(patch), id, updatedAt: now() };
+            // A primary thermographer who is no longer assigned is cleared.
+            if (patch.inspectorIds && next.primaryThermographerId && !next.inspectorIds.includes(next.primaryThermographerId)) { next.primaryThermographerId = null; next.primaryLocked = false; }
+            return next;
+          }) }));
         },
         setInspectionStatus(id, status, detail) {
           const insp = get().inspections.find((i) => i.id === id);
@@ -339,10 +367,24 @@ export const storeInitializer: StateCreator<Store> = (set, get) => {
             return false;
           }
           set((s) => ({ inspections: s.inspections.map((i) => (i.id === id ? { ...i, status, updatedAt: now() } : i)) }));
-          get().logEvent(id, "Status changed", `${prev} → ${status}${detail ? ` (${detail})` : ""}`);
+          // Shared inspections: the database records exactly one "Submitted for review" event per
+          // submission, whichever phone (or both) sent it. Other status changes are logged here.
+          if (!(status === "Needs Review" && insp.organizationId !== DEMO_ORG_ID)) {
+            get().logEvent(id, "Status changed", `${prev} → ${status}${detail ? ` (${detail})` : ""}`);
+          }
           return true;
         },
 
+        setPrimaryThermographer(inspectionId, userId, opts) {
+          const insp = get().inspections.find((i) => i.id === inspectionId);
+          if (!insp) return false;
+          if (userId && !insp.inspectorIds.includes(userId)) return false;
+          if (!opts?.designate && insp.primaryLocked) return false;
+          const primaryLocked = opts?.designate ? !!userId : false;
+          if ((insp.primaryThermographerId ?? null) === userId && !!insp.primaryLocked === primaryLocked) return true;
+          set((s) => ({ inspections: s.inspections.map((i) => (i.id === inspectionId ? { ...i, primaryThermographerId: userId, primaryLocked, updatedAt: now() } : i)) }));
+          return true;
+        },
         reopenInspection(id, reason) {
           const insp = get().inspections.find((i) => i.id === id);
           if (!insp || !isLockedStatus(insp.status)) return false;
@@ -355,12 +397,13 @@ export const storeInitializer: StateCreator<Store> = (set, get) => {
           const s = get();
           const rooms = s.rooms.filter((r) => r.inspectionId === inspectionId);
           const locs = new Map(s.locations.map((l) => [l.id, l]));
-          const insp = s.inspections.find((i) => i.id === inspectionId);
-          return checkExit(requiredBuildings(rooms, locs), s.photos, inspectionId, !!insp && exteriorPhotoOptional(insp));
+          return checkExit(requiredBuildings(rooms, locs), s.photos, inspectionId, s.exteriorChecks ?? []);
         },
         startSiteVisit(inspectionId) {
           const insp = get().inspections.find((i) => i.id === inspectionId);
           if (!insp) return;
+          // Only one thermographer assigned and none chosen: that person is the primary.
+          if (!insp.primaryThermographerId && insp.inspectorIds.length === 1 && !isInspectionLocked(insp)) get().setPrimaryThermographer(inspectionId, insp.inspectorIds[0]);
           const sessions = insp.siteVisit.sessions;
           const open = sessions.length > 0 && sessions[sessions.length - 1].endedAt === null;
           const resumed = insp.siteVisit.state === "paused";
@@ -412,14 +455,40 @@ export const storeInitializer: StateCreator<Store> = (set, get) => {
           if (!insp || insp.siteVisit.lastActiveLocationId === locationId) return;
           set((s) => ({ inspections: s.inspections.map((i) => (i.id === inspectionId ? { ...i, siteVisit: { ...i.siteVisit, lastActiveLocationId: locationId } } : i)) }));
         },
+        acknowledgeExterior(inspectionId, building, status, note = "") {
+          const insp = get().inspections.find((i) => i.id === inspectionId);
+          if (!insp || isInspectionLocked(insp)) return false;
+          if (status === "exception" && !note.trim()) return false;
+          const id = exteriorCheckId(inspectionId, building);
+          const check: ExteriorCheck = { id, organizationId: insp.organizationId, inspectionId, building, status, note: note.trim(), acknowledgedBy: get().currentUserId, acknowledgedAt: now() };
+          set((s) => ({ exteriorChecks: [...(s.exteriorChecks ?? []).filter((c) => c.id !== id), check] }));
+          get().logEvent(inspectionId, "Exterior photo acknowledged", `${building === "*" ? "Building" : building || "Main building"}: ${status === "photo" ? "photo taken on a phone" : status === "camera" ? "already taken with the camera" : `exception: ${note.trim()}`}`);
+          return true;
+        },
         addPhotoRecord(photo) {
           set((s) => ({ photos: [...s.photos.filter((p) => p.id !== photo.id), { ...photo, organizationId: org(), savedAt: now() }] }));
+          // The photo stays on this device, but a typed note is inspection data: keep it on the equipment line so it syncs and exports.
+          const note = photo.note?.trim();
+          if (note && photo.resultId && !isInspectionLocked(get().inspections.find((i) => i.id === photo.inspectionId))) {
+            const entry = { photoId: photo.id, kind: photo.kind, note, at: now() };
+            set((s) => ({ results: s.results.map((r) => (r.id === photo.resultId ? { ...r, photoNotes: [...(r.photoNotes ?? []).filter((n) => n.photoId !== photo.id), entry] } : r)) }));
+          }
           touch(photo.inspectionId);
-          if (photo.kind === "exterior") get().logEvent(photo.inspectionId, "Exterior photo saved", photo.building ? `Building: ${photo.building}` : "Main building");
+          if (photo.kind === "exterior") {
+            get().logEvent(photo.inspectionId, "Exterior photo saved", photo.building ? `Building: ${photo.building}` : "Main building");
+            // Shared inspection: tell the other phone this building is done (the photo itself stays here).
+            const insp = get().inspections.find((i) => i.id === photo.inspectionId);
+            if (insp && insp.organizationId !== DEMO_ORG_ID && !(get().exteriorChecks ?? []).some((c) => c.id === exteriorCheckId(photo.inspectionId, photo.building))) {
+              get().acknowledgeExterior(photo.inspectionId, photo.building, "photo");
+            }
+          }
         },
         removePhotoRecord(id) {
           const p = get().photos.find((x) => x.id === id);
           set((s) => ({ photos: s.photos.filter((x) => x.id !== id) }));
+          if (p?.resultId && !isInspectionLocked(get().inspections.find((i) => i.id === p.inspectionId))) {
+            set((s) => ({ results: s.results.map((r) => (r.id === p.resultId && r.photoNotes?.some((n) => n.photoId === id) ? { ...r, photoNotes: r.photoNotes.filter((n) => n.photoId !== id) } : r)) }));
+          }
           if (p) touch(p.inspectionId);
         },
         setPhotoBuilding(id, building) {
@@ -517,6 +586,7 @@ export const storeInitializer: StateCreator<Store> = (set, get) => {
             source: "manual", sortOrder: nextResultOrder(inspectionId), createdAt: now(), updatedAt: now(),
           };
           set((s) => ({ results: [...s.results, result] }));
+          if (row.afterResultId) get().moveResult(id, { after: row.afterResultId });
           touch(inspectionId);
           if (insp.status === "Draft") get().setInspectionStatus(inspectionId, "In Progress", "first equipment recorded");
           return id;
@@ -580,6 +650,31 @@ export const storeInitializer: StateCreator<Store> = (set, get) => {
           const order = new Map(moved.map((x, i) => [x.id, i + 1]));
           set((st) => ({ results: st.results.map((x) => (order.has(x.id) ? { ...x, sortOrder: order.get(x.id)! } : x)) }));
           return newId;
+        },
+        moveResult(id, to) {
+          if (lockedResult(id)) return false;
+          const r = get().results.find((x) => x.id === id);
+          if (!r) return false;
+          const others = roomOrder(get().results, r).filter((x) => x.id !== id);
+          const cur = roomOrder(get().results, r).findIndex((x) => x.id === id);
+          let at: number;
+          if (to === "up") at = Math.max(0, cur - 1);
+          else if (to === "down") at = Math.min(others.length, cur + 1);
+          else at = to.after === null ? 0 : others.findIndex((x) => x.id === to.after) + 1;
+          if (at < 0 || (to !== "up" && to !== "down" && to.after === id)) return false;
+          if (at === cur) return false;
+          const order = slotBetween(others[at - 1]?.sortOrder, others[at]?.sortOrder);
+          if (order === null) {
+            // Equal neighbours (older data): renumber this room once, then place the item.
+            const list = [...others];
+            list.splice(at, 0, r);
+            const map = new Map(list.map((x, i) => [x.id, (i + 1) * 1000]));
+            set((s) => ({ results: s.results.map((x) => (map.has(x.id) ? { ...x, sortOrder: map.get(x.id)! } : x)) }));
+          } else {
+            set((s) => ({ results: s.results.map((x) => (x.id === id ? { ...x, sortOrder: order } : x)) }));
+          }
+          touch(r.inspectionId);
+          return true;
         },
         addThermalImage(resultId, partial) {
           if (lockedResult(resultId)) return "";
@@ -689,6 +784,7 @@ export const storeInitializer: StateCreator<Store> = (set, get) => {
             documents: s.documents.filter((x) => !x.inspectionId || !plan.inspections.has(x.inspectionId)),
             photos: s.photos.filter((x) => !plan.inspections.has(x.inspectionId)),
             reviewEvents: s.reviewEvents.filter((x) => !plan.inspections.has(x.inspectionId)),
+            exteriorChecks: (s.exteriorChecks ?? []).filter((x) => !plan.inspections.has(x.inspectionId)),
             activeInspectionId: s.activeInspectionId && plan.inspections.has(s.activeInspectionId) ? null : s.activeInspectionId,
           });
           return demoCounts(plan);
@@ -736,6 +832,21 @@ export const useStore = create<Store>()(
     },
   ),
 );
+
+/** Equipment lines of one room in their order (stable for equal positions). */
+export function roomOrder(results: InspectionResult[], of: Pick<InspectionResult, "inspectionId" | "locationId">): InspectionResult[] {
+  return results.filter((x) => x.inspectionId === of.inspectionId && x.locationId === of.locationId)
+    .sort((a, b) => a.sortOrder - b.sortOrder || a.createdAt.localeCompare(b.createdAt) || (a.id < b.id ? -1 : 1));
+}
+
+/** A position strictly between two neighbours, or null when they are equal. */
+export function slotBetween(prev: number | undefined, next: number | undefined): number | null {
+  if (prev === undefined && next === undefined) return 1000;
+  if (prev === undefined) return next! - 1000;
+  if (next === undefined) return prev + 1000;
+  if (next - prev <= 1e-9) return null;
+  return (prev + next) / 2;
+}
 
 export function allowedCauses(settings: OrganizationSettings | undefined): string[] {
   return [...BUILT_IN_POSSIBLE_CAUSES, ...(settings?.customPossibleCauses ?? [])];

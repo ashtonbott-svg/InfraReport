@@ -11,6 +11,7 @@ export async function GET() {
   const cfg = readServerConfig();
   let secretKeyAccepted: boolean | null = null;
   let secretKeyError: string | null = null;
+  let migration5: boolean | null = null;
   if (!cfg.problems.length) {
     try {
       const admin = createClient(cfg.values.url, cfg.values.secret, { auth: { persistSession: false, autoRefreshToken: false } });
@@ -21,6 +22,13 @@ export async function GET() {
         // Server-only tables must be reachable with the secret key (migrations applied, key has service access).
         const { error: tErr } = await admin.from("tech_credentials").select("user_id", { head: true, count: "exact" });
         if (tErr) { secretKeyAccepted = false; secretKeyError = `database: ${tErr.message}`; }
+        // Database version this app needs: migration 5 (field test improvements).
+        const [a, b, c] = await Promise.all([
+          admin.from("inspections").select("approval_snapshot, primary_thermographer, primary_locked, submission_count", { head: true }),
+          admin.from("exterior_checks").select("id", { head: true }),
+          admin.from("results").select("photo_notes", { head: true }),
+        ]);
+        migration5 = !a.error && !b.error && !c.error;
       }
     } catch (e) {
       secretKeyAccepted = false;
@@ -29,7 +37,8 @@ export async function GET() {
   }
   return NextResponse.json({
     ...cfg.present,
-    ready: cfg.problems.length === 0 && secretKeyAccepted === true,
+    ready: cfg.problems.length === 0 && secretKeyAccepted === true && migration5 === true,
+    migration5,
     problems: cfg.problems,
     secretKeyAccepted,
     secretKeyError,

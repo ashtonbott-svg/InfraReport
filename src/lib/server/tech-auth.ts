@@ -162,30 +162,72 @@ export async function mintSession(d: AuthDeps, userId: string): Promise<Session>
   return s.session;
 }
 
-export async function activateDevice(d: AuthDeps, input: { token: string; tempPin: string; newPin: string; confirmPin: string; label: string; ip: string }) {
+/** What the activation page needs to show (no secrets): whose link it is and whether they already have a PIN. */
+export async function activationInfo(d: AuthDeps, input: { token: string; ip: string }) {
+  await rateLimit(d, `activate:${input.ip}`, 30, 15 * 60);
+  const act = await must(d.admin.from("tech_activations").select("*").eq("token_hash", sha256(input.token || "")).maybeSingle(), "activation");
+  if (!act || act.used_at || new Date(act.expires_at as string) < nowOf(d) || (act.failed_attempts as number) >= MAX_ACTIVATION_FAILURES) {
+    throw new AuthError("This activation link is invalid, already used or expired. Ask your administrator for a new one.", 403, "activation_invalid");
+  }
+  const member = await getMember(d, act.user_id as string);
+  if (!member || !member.active) throw new AuthError("This account is disabled.", 403, "disabled");
+  const cred = await must(d.admin.from("tech_credentials").select("pin_hash").eq("user_id", act.user_id).maybeSingle(), "credentials");
+  return { name: member.display_name, hasPin: !!cred?.pin_hash };
+}
+
+/**
+ * Trust a new phone. Two cases:
+ *  - First time (no personal PIN yet): activation link + temporary PIN 12345, then a new personal PIN.
+ *  - Existing technician (PIN already set, e.g. a new phone or a new web address): activation
+ *    link + their CURRENT PIN. The PIN is not changed. Wrong PINs count toward the lockout.
+ */
+export async function activateDevice(d: AuthDeps, input: { token: string; tempPin?: string; newPin?: string; confirmPin?: string; currentPin?: string; label: string; ip: string }) {
   await rateLimit(d, `activate:${input.ip}`, 10, 15 * 60);
   const act = await must(d.admin.from("tech_activations").select("*").eq("token_hash", sha256(input.token || "")).maybeSingle(), "activation");
   const now = nowOf(d);
   if (!act || act.used_at || new Date(act.expires_at as string) < now || (act.failed_attempts as number) >= MAX_ACTIVATION_FAILURES) {
     throw new AuthError("This activation link is invalid, already used or expired. Ask your administrator for a new one.", 403, "activation_invalid");
   }
-  if (input.tempPin !== TEMP_PIN) {
-    await must(d.admin.from("tech_activations").update({ failed_attempts: (act.failed_attempts as number) + 1 }).eq("id", act.id), "activation");
-    throw new AuthError("Temporary PIN is incorrect.", 403, "temp_pin_wrong");
-  }
-  const problem = pinProblem(input.newPin);
-  if (problem) throw new AuthError(problem, 400, "pin_weak");
-  if (input.newPin !== input.confirmPin) throw new AuthError("The two PINs do not match.", 400, "pin_mismatch");
   const member = await getMember(d, act.user_id as string);
   if (!member || !member.active || member.role !== "technician") throw new AuthError("This account is disabled.", 403, "disabled");
+  const cred = await must(d.admin.from("tech_credentials").select("*").eq("user_id", act.user_id).maybeSingle(), "credentials");
+  const keepPin = !!cred?.pin_hash;
+
+  if (keepPin) {
+    if (cred!.locked_until && new Date(cred!.locked_until as string) > now) {
+      throw new AuthError(`Too many wrong PINs. Locked until ${new Date(cred!.locked_until as string).toLocaleTimeString("en-US")}.`, 423, "locked");
+    }
+    const ok = /^\d{4,6}$/.test(input.currentPin ?? "") && (await verifyPin(input.currentPin!, cred!.pin_hash as string, d.pepper));
+    if (!ok) {
+      const failed = (cred!.failed_attempts as number) + 1;
+      const lock = failed >= MAX_PIN_FAILURES;
+      await must(d.admin.from("tech_credentials").update({
+        failed_attempts: lock ? 0 : failed, locked_until: lock ? new Date(now.getTime() + LOCK_MINUTES * 60_000).toISOString() : cred!.locked_until, updated_at: now.toISOString(),
+      }).eq("user_id", act.user_id), "record failure");
+      await must(d.admin.from("tech_activations").update({ failed_attempts: (act.failed_attempts as number) + 1 }).eq("id", act.id), "activation");
+      throw new AuthError(lock ? `Too many wrong PINs. Locked for ${LOCK_MINUTES} minutes.` : "That PIN is not correct. Use the PIN you already sign in with.", lock ? 423 : 401, lock ? "locked" : "pin_wrong");
+    }
+  } else {
+    if (input.tempPin !== TEMP_PIN) {
+      await must(d.admin.from("tech_activations").update({ failed_attempts: (act.failed_attempts as number) + 1 }).eq("id", act.id), "activation");
+      throw new AuthError("Temporary PIN is incorrect.", 403, "temp_pin_wrong");
+    }
+    const problem = pinProblem(input.newPin ?? "");
+    if (problem) throw new AuthError(problem, 400, "pin_weak");
+    if (input.newPin !== input.confirmPin) throw new AuthError("The two PINs do not match.", 400, "pin_mismatch");
+  }
   // Single use: claim the activation atomically before doing anything else.
   const claimed = await must(d.admin.from("tech_activations").update({ used_at: now.toISOString() }).eq("id", act.id).is("used_at", null).select("id"), "claim activation");
   if (!(claimed as unknown[]).length) throw new AuthError("This activation link was already used.", 403, "activation_invalid");
-  await must(d.admin.from("tech_credentials").upsert({ user_id: act.user_id, pin_hash: await hashPin(input.newPin, d.pepper), pin_set_at: now.toISOString(), failed_attempts: 0, locked_until: null, updated_at: now.toISOString() }), "set pin");
+  if (keepPin) {
+    await must(d.admin.from("tech_credentials").update({ failed_attempts: 0, locked_until: null, updated_at: now.toISOString() }).eq("user_id", act.user_id), "reset failures");
+  } else {
+    await must(d.admin.from("tech_credentials").upsert({ user_id: act.user_id, pin_hash: await hashPin(input.newPin!, d.pepper), pin_set_at: now.toISOString(), failed_attempts: 0, locked_until: null, updated_at: now.toISOString() }), "set pin");
+  }
   const deviceToken = randomToken(32);
   await must(d.admin.from("tech_devices").insert({ user_id: act.user_id, token_hash: sha256(deviceToken), label: input.label.slice(0, 80), last_used_at: now.toISOString() }), "device");
   const session = await mintSession(d, act.user_id as string);
-  return { userId: act.user_id as string, name: member.display_name, deviceToken, session };
+  return { userId: act.user_id as string, name: member.display_name, deviceToken, session, keptPin: keepPin };
 }
 
 export async function pinLogin(d: AuthDeps, input: { deviceToken: string; userId: string; pin: string; ip: string }) {

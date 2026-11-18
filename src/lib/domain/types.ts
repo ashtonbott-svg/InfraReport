@@ -134,6 +134,19 @@ export interface Inspection {
   reopenCount?: number;
   /** Why an administrator reopened an approved inspection. */
   reopenReason?: string;
+  /** Names and room order as they were at the last approval (set by the database). */
+  approvalSnapshot?: ApprovalSnapshot | null;
+  /** The thermographer responsible for the camera and photographs (one of the assigned people). */
+  primaryThermographerId?: ID | null;
+  /** True when an administrator designated the primary thermographer (technicians cannot change it). */
+  primaryLocked?: boolean;
+  submittedBy?: ID | null;
+}
+
+export interface ApprovalSnapshot {
+  at: ISODateTime;
+  equipment: Record<ID, { name: string }>;
+  locations: Record<ID, { building: string; name: string; sort_order: number }>;
 }
 
 export type SiteVisitState = "not-started" | "active" | "paused" | "completed";
@@ -204,8 +217,12 @@ export interface InspectionResult {
   opened: string;
   /** Item documented as not scanned or deferred (no fake image numbers needed). */
   exception: ResultException | null;
+  /** Historical extraction field. Kept in the data, no longer exported. */
   confidence: string;
+  /** Equipment-level notes typed during the inspection or by an administrator. */
   reviewNotes: string;
+  /** Notes typed on this item's photos (synced as text; the photos stay on the phone). */
+  photoNotes?: PhotoNote[];
   overrides: ResultOverrides;
   source: ResultSource;
   sortOrder: number;
@@ -258,6 +275,26 @@ export type PhotoKind = "exterior" | "equipment" | "before-opening";
  * IndexedDB (never localStorage); this record is only created after the binary
  * write has been verified, so a Photo row always means "saved on this device".
  */
+/**
+ * Front-of-building reminder, per building, shared between phones. Records that
+ * the exterior photo was taken (on a phone, or with the inspection camera), or
+ * why it could not be. It never claims a photo was uploaded.
+ */
+export type ExteriorCheckStatus = "photo" | "camera" | "exception";
+export interface ExteriorCheck {
+  id: ID;
+  organizationId: ID;
+  inspectionId: ID;
+  /** Building key ("" = main building, "*" = before any room existed). */
+  building: string;
+  status: ExteriorCheckStatus;
+  note: string;
+  acknowledgedBy: ID | null;
+  acknowledgedAt: ISODateTime;
+}
+
+export interface PhotoNote { photoId: ID; kind: PhotoKind; note: string; at: ISODateTime }
+
 export interface Photo {
   id: ID;
   organizationId: ID;

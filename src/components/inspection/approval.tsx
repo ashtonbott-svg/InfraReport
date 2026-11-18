@@ -8,6 +8,7 @@ import { toast } from "@/components/ui/toast";
 import { useRole } from "@/lib/cloud/role";
 import { useSession } from "@/lib/cloud/session";
 import { supabase } from "@/lib/cloud/client";
+import { syncNow } from "@/lib/sync/runtime";
 import { isInspectionLocked, useStore } from "@/lib/store/store";
 import { formatDateTime } from "@/lib/format";
 import { describeRecord, fieldLabel, showValue } from "@/components/sync/describe";
@@ -60,7 +61,7 @@ export function ApprovalBanner({ inspection }: { inspection: Inspection }) {
 
 interface ChangeRow { id: number; table_name: string; record_id: string; action: string; changes: Record<string, [unknown, unknown]>; changed_by: string | null; changed_at: string }
 
-const HIDDEN = new Set(["submitted_at", "submitted_by", "approved_at", "approved_by", "first_approved_at", "reopened_at", "reopened_by", "reopen_count", "deleted_at"]);
+const HIDDEN = new Set(["submitted_at", "submitted_by", "approved_at", "approved_by", "first_approved_at", "reopened_at", "reopened_by", "reopen_count", "deleted_at", "approval_snapshot", "submission_count"]);
 
 /** Administrators: everything changed after the first approval, read from the database's change log. */
 export function ChangesSinceApproval({ inspection }: { inspection: Inspection }) {
@@ -104,5 +105,72 @@ export function ChangesSinceApproval({ inspection }: { inspection: Inspection })
         )}
       </CardBody>
     </Card>
+  );
+}
+
+/* ------------------------------ submission ------------------------------ */
+
+/** "Submitted for Review by … at …" once any assigned person submitted; otherwise the Submit button. */
+export function SubmitControl({ inspection, disabled, onBlocked }: { inspection: Inspection; disabled?: boolean; onBlocked: () => void }) {
+  const members = useSession((s) => s.members);
+  const setStatus = useStore((s) => s.setInspectionStatus);
+  const [busy, setBusy] = useState(false);
+  const submitted = inspection.status !== "Draft" && inspection.status !== "In Progress";
+  if (submitted) {
+    const who = members.find((m) => m.userId === inspection.submittedBy)?.name;
+    return (
+      <div className="rounded-lg border border-slate-200 bg-slate-50 px-3 py-2 text-sm text-slate-700" data-testid="submitted-info">
+        <strong>Submitted for Review</strong>{who ? ` by ${who}` : ""}{inspection.submittedAt ? ` · ${formatDateTime(inspection.submittedAt)}` : ""}
+      </div>
+    );
+  }
+  const submit = async () => {
+    setBusy(true);
+    try {
+      // Get the latest first: a teammate may already have submitted from their phone.
+      await syncNow()?.catch(() => undefined);
+      const fresh = useStore.getState().inspections.find((i) => i.id === inspection.id);
+      if (fresh && fresh.status !== "Draft" && fresh.status !== "In Progress") { toast("Already submitted for review"); return; }
+      if (setStatus(inspection.id, "Needs Review")) toast("Submitted for review"); else onBlocked();
+    } finally { setBusy(false); }
+  };
+  return <Button disabled={disabled || busy} onClick={() => void submit()} data-testid="submit-review">{busy ? "Checking…" : "Submit for Review"}</Button>;
+}
+
+interface ReportRow { device_id: string; user_id: string; pending: number; failed: number; reported_at: string }
+
+/** Administrators: what each phone last reported about changes it has not uploaded for this inspection. */
+export function useDeviceReports(inspection: Inspection) {
+  const { isAdmin, cloud } = useRole();
+  const [rows, setRows] = useState<ReportRow[] | null>(null);
+  const key = `${inspection.id}|${inspection.updatedAt}|${inspection.status}`;
+  useEffect(() => {
+    const sb = supabase();
+    if (!sb || !cloud || !isAdmin) return;
+    let alive = true;
+    sb.from("sync_reports").select("device_id, user_id, pending, failed, reported_at").eq("inspection_id", inspection.id).order("reported_at", { ascending: false })
+      .then(({ data, error }) => { if (alive) setRows(error ? [] : ((data ?? []) as ReportRow[])); });
+    return () => { alive = false; };
+  }, [cloud, isAdmin, inspection.id, key]);
+  return rows;
+}
+
+export function DeviceReports({ rows }: { rows: ReportRow[] | null }) {
+  const members = useSession((s) => s.members);
+  if (!rows || rows.length === 0) return null;
+  const name = (id: string) => members.find((m) => m.userId === id)?.name ?? "A teammate";
+  const waiting = rows.filter((r) => r.pending > 0 || r.failed > 0);
+  return (
+    <div className={waiting.length ? "rounded-lg border border-amber-300 bg-amber-50 p-3 text-amber-950" : "rounded-lg border border-slate-200 bg-slate-50 p-3 text-slate-700"} data-testid="device-reports">
+      <div className="mb-1 font-semibold">{waiting.length ? "Phones with changes not uploaded yet" : "Phones report everything uploaded"}</div>
+      <ul className="space-y-0.5 text-xs">
+        {rows.map((r) => (
+          <li key={r.device_id}>
+            {name(r.user_id)}&apos;s device: {r.pending || r.failed ? <strong>{r.pending ? `${r.pending} waiting` : ""}{r.pending && r.failed ? ", " : ""}{r.failed ? `${r.failed} failed` : ""}</strong> : "nothing waiting"} · reported {formatDateTime(r.reported_at)}
+          </li>
+        ))}
+      </ul>
+      <p className="mt-1 text-[11px] opacity-80">A phone that is offline cannot report; this is its last report.</p>
+    </div>
   );
 }

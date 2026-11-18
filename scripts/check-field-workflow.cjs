@@ -103,7 +103,7 @@ const V3 = {
   ok("4/6. IR then Distance: visual auto = 120, Next moves IR -> Distance");
 
   // 2. second image; 7. Distance first then IR; 5. different visual
-  await page.getByRole("button", { name: "Add Another Image" }).click();
+  await page.getByRole("button", { name: "Add Equipment View" }).click();
   await page.locator("#ed-1-comp").fill("Bottom Half");
   await page.locator("#ed-1-dist").fill("3");
   await page.locator("#ed-1-dist").press("Enter");
@@ -193,14 +193,15 @@ const V3 = {
   const exportBtn = dp.getByTestId("export-xlsx");
   await exportBtn.waitFor();
   // The inspection is still active in the copied state; the review page belongs to it, so it is reachable.
-  const [dl] = await Promise.all([dp.waitForEvent("download"), exportBtn.click()]);
+  await exportBtn.click(); // opens the format choice
+  const [dl] = await Promise.all([dp.waitForEvent("download"), dp.getByTestId("export-xlsx-infinite").click()]);
   const file = path.join(OUT || require("os").tmpdir(), dl.suggestedFilename());
   await dl.saveAs(file);
   if (!file.endsWith(".xlsx")) throw new Error("not xlsx: " + file);
   const { default: readXlsx } = await import(path.join(__dirname, "../node_modules/read-excel-file/universal/index.js"));
   const book = await readXlsx(new Blob([fs.readFileSync(file)]));
   const gen = book[0].data;
-  if (book[0].sheet !== "Generator Import" || gen[0].length !== 16 || gen.some((r) => r.length !== 16)) throw new Error("sheet shape");
+  if (book[0].sheet !== "Generator Import" || gen[0].length !== 15 || gen.some((r) => r.length !== 15) || gen[0].includes("Confidence")) throw new Error("sheet shape");
   const rows = gen.slice(1).map((r) => `${r[4]}|${r[5]}|${r[6]}|${r[8]}|${r[9]}|${r[13]}`);
   const expect = [
     "Panel P1|Full Panel|4|104|104|Yes, Completely",
@@ -214,7 +215,10 @@ const V3 = {
   if (JSON.stringify(rows) !== JSON.stringify(expect)) throw new Error("xlsx rows:\n" + rows.join("\n"));
   if (typeof gen[1][6] !== "number" || typeof gen[1][8] !== "number" || !(gen[1][0] instanceof Date) || gen[1][2] !== 45) throw new Error("cell types: " + JSON.stringify(gen[1]));
   if (gen[2][11] !== 131.7 || gen[2][7] !== "Loose Connection(s)") throw new Error("finding row: " + JSON.stringify(gen[2]));
-  ok(`14. ${dl.suggestedFilename()}: real .xlsx, 16 columns, one row per thermal image (7 rows for 6 items), typed cells`);
+  // The finding note saved on the phone yesterday ("hot lug") is now in Review Notes.
+  if (gen[2][14] !== "hot lug") throw new Error("finding note missing from Review Notes: " + JSON.stringify(gen[2]));
+  if (!/^InfraReport_Top_Golf_Canton_Massachusetts_TopGolf_Canton_2026-11-12\.xlsx$/.test(dl.suggestedFilename())) throw new Error("file name: " + dl.suggestedFilename());
+  ok(`14. ${dl.suggestedFilename()}: real .xlsx, 15 columns (no Confidence), one row per thermal image (7 rows for 6 items), typed cells, finding note in Review Notes`);
   await d.close();
 
   // Layout: IR/Distance visible without scrolling on small and large devices

@@ -2,20 +2,18 @@
 
 import Link from "next/link";
 import { useMemo } from "react";
-import { Download, FileSpreadsheet, FileText, Lock } from "lucide-react";
+import { FileSpreadsheet, FileText, Lock } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Card, CardBody, CardHeader } from "@/components/ui/card";
 import { Badge, StatusBadge } from "@/components/ui/badge";
 import { PageHeader, Table, td, th } from "@/components/ui/misc";
 import { toast } from "@/components/ui/toast";
-import { useAllowedCauses, useCustomers, useEquipment, useFacilities, useInspections, useLocations, useOrganization, useResults, useRooms, useUsers } from "@/lib/store/hooks";
-import { useStore } from "@/lib/store/store";
-import { buildGeneratorRows, exportFileName, toCsv, type ExportDataset } from "@/lib/domain/csv";
+import { useAllowedCauses, useCustomers, useEquipment, useFacilities, useInspections, useLocations, useOrganization, useResults, useRooms } from "@/lib/store/hooks";
+import { buildGeneratorRows, exportFileName, inspectionStartDate, toCsv, withApprovalSnapshot, type ExportDataset } from "@/lib/domain/csv";
+import { DownloadExcelButton } from "@/components/inspection/download-excel";
 import { countBySeverity, validateInspection } from "@/lib/domain/validation";
 import { resultHasFinding } from "@/lib/domain/thermal";
 import { downloadText } from "@/lib/download";
-import { exportInspectionXlsx } from "@/lib/export-excel";
-import { inspectorNames } from "@/components/forms/thermographer-picker";
 import { formatDate } from "@/lib/format";
 
 export default function ReportsPage() {
@@ -28,14 +26,12 @@ export default function ReportsPage() {
   const rooms = useRooms();
   const causes = useAllowedCauses();
   const org = useOrganization();
-  const users = useUsers();
-  const logEvent = useStore((s) => s.logEvent);
 
   const rows = useMemo(() => {
     const eqMap = new Map(equipment.map((e) => [e.id, e]));
     const locMap = new Map(locations.map((l) => [l.id, l]));
     return [...inspections].sort((a, b) => b.date.localeCompare(a.date)).map((inspection) => {
-      const ds: ExportDataset = { inspection, results: results.filter((r) => r.inspectionId === inspection.id), equipment: eqMap, locations: locMap, rooms: rooms.filter((r) => r.inspectionId === inspection.id) };
+      const ds: ExportDataset = withApprovalSnapshot({ inspection, results: results.filter((r) => r.inspectionId === inspection.id), equipment: eqMap, locations: locMap, rooms: rooms.filter((r) => r.inspectionId === inspection.id) });
       const counts = countBySeverity(validateInspection(ds, { allowedCauses: causes }));
       return {
         inspection, ds, counts,
@@ -48,24 +44,15 @@ export default function ReportsPage() {
 
   const exportOne = (r: (typeof rows)[number]) => {
     const data = buildGeneratorRows(r.ds);
-    downloadText(exportFileName(r.customer, r.facility, r.inspection.date), toCsv(data, { includeBom: org?.settings.csvIncludeBom ?? true }));
-    logEvent(r.inspection.id, "Generator CSV exported", `${data.length} rows, 16 columns`);
+    downloadText(exportFileName(r.customer, r.facility, inspectionStartDate(r.ds)), toCsv(data, { includeBom: org?.settings.csvIncludeBom ?? true }));
     toast(`Exported ${data.length} rows (CSV)`);
   };
-  const exportXlsx = async (r: (typeof rows)[number]) => {
-    try {
-      const n = await exportInspectionXlsx(r.ds, { customer: r.customer, facility: r.facility, inspectionDate: r.inspection.date, thermographers: inspectorNames(r.inspection.inspectorIds, users) });
-      logEvent(r.inspection.id, "Excel workbook exported", `${n} Generator rows, 16 columns`);
-      toast(`Excel workbook exported: ${n} rows`);
-    } catch (e) { toast(e instanceof Error ? e.message : "Excel export failed", "error"); }
-  };
-
 
   return (
     <>
       <PageHeader title="Reports" description="Report readiness, validation status, and exports for every inspection." />
       <div className="mb-6 grid gap-3 md:grid-cols-3">
-        <Card><CardBody className="flex gap-3"><FileSpreadsheet className="h-5 w-5 shrink-0 text-emerald-600" /><div><div className="text-sm font-semibold">Excel workbook (.xlsx)</div><div className="text-xs text-slate-500">Default export. Generator Import sheet with the exact 16 columns, one row per thermal image. CSV still available.</div></div></CardBody></Card>
+        <Card><CardBody className="flex gap-3"><FileSpreadsheet className="h-5 w-5 shrink-0 text-emerald-600" /><div><div className="text-sm font-semibold">Excel workbook (.xlsx)</div><div className="text-xs text-slate-500">Choose Infinite Infrared (15 columns, three sheets) or IRT (14 columns, one Data sheet). One row per thermal image. CSV still available.</div></div></CardBody></Card>
         <Card><CardBody className="flex gap-3"><Lock className="h-5 w-5 shrink-0 text-slate-400" /><div><div className="text-sm font-semibold">Filling your Generator workbook</div><div className="text-xs text-slate-500">Not automated yet: paste or import the Generator Import sheet. Macros are not run; columns O, P, Q stay untouched.</div></div></CardBody></Card>
         <Card><CardBody className="flex gap-3"><FileText className="h-5 w-5 shrink-0 text-slate-400" /><div><div className="text-sm font-semibold">Finished PDF report</div><div className="text-xs text-slate-500">Not generated by InfraReport yet. Your existing Generator remains the report source.</div></div></CardBody></Card>
       </div>
@@ -91,7 +78,7 @@ export default function ReportsPage() {
                 </td>
                 <td className={td}>
                   <div className="flex flex-wrap gap-2">
-                    <Button size="sm" variant="primary" onClick={() => exportXlsx(r)} disabled={r.ds.results.length === 0}><Download className="h-3.5 w-3.5" />Excel</Button>
+                    <DownloadExcelButton inspectionId={r.inspection.id} size="sm" label="Excel" disabled={r.ds.results.length === 0} />
                     <Button size="sm" onClick={() => exportOne(r)} disabled={r.ds.results.length === 0}>CSV</Button>
                     <Button size="sm" disabled title="Planned: requires Generator integration">PDF</Button>
                   </div>

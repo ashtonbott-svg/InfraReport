@@ -25,7 +25,7 @@ export default function TechniciansPage() {
   const [error, setError] = useState<string | null>(null);
   const [name, setName] = useState("");
   const [cert, setCert] = useState("Level I Thermographer");
-  const [link, setLink] = useState<{ userId: string; url: string; expiresAt: string } | null>(null);
+  const [link, setLink] = useState<{ userId: string; url: string; expiresAt: string; keepsPin: boolean } | null>(null);
   const [busy, setBusy] = useState(false);
 
   const load = useCallback(async () => {
@@ -48,8 +48,9 @@ export default function TechniciansPage() {
     setBusy(true);
     try { await fn(); } catch (e) { toast(e instanceof Error ? e.message : "Failed", "error"); } finally { setBusy(false); }
   };
-  const showLink = (userId: string, r: { token: string; expiresAt: string }) =>
-    setLink({ userId, url: `${window.location.origin}/activate#t=${r.token}`, expiresAt: r.expiresAt });
+  // The link always points at the address this page is open on (production when used there).
+  const showLink = (userId: string, r: { token: string; expiresAt: string }, keepsPin = false) =>
+    setLink({ userId, url: `${window.location.origin}/activate#t=${r.token}`, expiresAt: r.expiresAt, keepsPin });
 
   const create = () => run(async () => {
     const { userId } = await api<{ userId: string }>("/api/admin/technicians", { method: "POST", json: { name, certification: cert } });
@@ -60,7 +61,7 @@ export default function TechniciansPage() {
     await Promise.all([load(), refreshIdentity()]);
   });
   const activation = (p: Person) => run(async () => {
-    showLink(p.userId, await api(`/api/admin/technicians/${p.userId}/activation`, { method: "POST", json: { hours: 24 } }));
+    showLink(p.userId, await api(`/api/admin/technicians/${p.userId}/activation`, { method: "POST", json: { hours: 24 } }), p.pinSet);
     await load();
   });
   const resetPin = (p: Person) => run(async () => {
@@ -93,8 +94,14 @@ export default function TechniciansPage() {
           <CardBody className="space-y-3 text-sm">
             <ol className="list-decimal space-y-1 pl-5 text-slate-700">
               <li>Send this link to the technician by text message. They open it <strong>on their own phone</strong>.</li>
-              <li>Tell them the temporary PIN <strong>12345</strong> separately (in person or by phone). It only works together with this link.</li>
-              <li>They choose a personal PIN. After that the phone signs in with name and PIN.</li>
+              {link.keepsPin ? (
+                <li>They enter the PIN they already use. <strong>Their PIN does not change.</strong> After that this phone signs in with name and PIN.</li>
+              ) : (
+                <>
+                  <li>Tell them the temporary PIN <strong>12345</strong> separately (in person or by phone). It only works together with this link.</li>
+                  <li>They choose a personal PIN. After that the phone signs in with name and PIN.</li>
+                </>
+              )}
             </ol>
             <div className="flex gap-2">
               <Input readOnly value={link.url} className="font-mono text-xs" onFocus={(e) => e.currentTarget.select()} />

@@ -1,4 +1,4 @@
-import type { Inspection, InspectionRoomConditions, Location, Photo, SiteVisit } from "./types";
+import type { ExteriorCheck, Inspection, InspectionRoomConditions, Location, Photo, SiteVisit } from "./types";
 
 export const MAIN_BUILDING = "";
 /** Requirement used before any room exists: any exterior photo satisfies it. */
@@ -36,11 +36,29 @@ export function exteriorPhotosFor(photos: Photo[], inspectionId: string): Photo[
   return photos.filter((p) => p.inspectionId === inspectionId && p.kind === "exterior");
 }
 
-/** Buildings still missing a saved exterior photo. */
-export function missingExteriorBuildings(required: string[], photos: Photo[], inspectionId: string): string[] {
+/** Deterministic id: two phones acknowledging the same building write the same record. */
+export function exteriorCheckId(inspectionId: string, building: string): string {
+  const key = building === ANY_BUILDING ? "any" : building.trim() ? building.trim().toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "") || "b" : "main";
+  return `xc-${inspectionId}-${key}`;
+}
+
+/** The acknowledgment that covers a required building, if any. */
+export function checkFor<C extends Pick<ExteriorCheck, "building" | "inspectionId">>(required: string[], building: string, checks: C[], inspectionId: string): C | undefined {
+  const mine = checks.filter((c) => c.inspectionId === inspectionId);
+  const exact = mine.find((c) => c.building.trim() === building.trim());
+  if (exact) return exact;
+  // Acknowledged before any room existed: counts for the main building, or for the only building.
+  const any = mine.find((c) => c.building === ANY_BUILDING);
+  if (any && (building === MAIN_BUILDING || required.filter((b) => b !== ANY_BUILDING).length <= 1)) return any;
+  if (building === ANY_BUILDING && mine.length) return mine[0];
+  return undefined;
+}
+
+/** Buildings still missing an exterior photo on this device and, for shared inspections, any acknowledgment. */
+export function missingExteriorBuildings(required: string[], photos: Photo[], inspectionId: string, checks: ExteriorCheck[] = []): string[] {
   const ext = exteriorPhotosFor(photos, inspectionId);
   const have = new Set(ext.map((p) => p.building.trim()));
-  return required.filter((b) => (b === ANY_BUILDING ? ext.length === 0 : !have.has(b)));
+  return required.filter((b) => !(b === ANY_BUILDING ? ext.length > 0 : have.has(b)) && !checkFor(required, b, checks, inspectionId));
 }
 
 export interface ExitCheck {
@@ -49,18 +67,15 @@ export interface ExitCheck {
 }
 
 /**
- * Pause / finish are only allowed once every required building has a saved photo.
- * In collaborative (cloud) inspections the exterior photo is optional: photos
- * stay on the phone that took them, so a teammate's missing photo must never
- * block the other phone. Missing buildings are still listed as a reminder.
+ * Pause / finish need every building's front photo dealt with: a photo saved on
+ * this device, or (shared inspections) a teammate's photo, "already taken with
+ * the camera", or a documented exception. Nobody is ever permanently blocked:
+ * the exception path is always available.
  */
-export function checkExit(required: string[], photos: Photo[], inspectionId: string, optional = false): ExitCheck {
-  const missing = missingExteriorBuildings(required, photos, inspectionId);
-  return { allowed: optional || missing.length === 0, missing };
+export function checkExit(required: string[], photos: Photo[], inspectionId: string, checks: ExteriorCheck[] = []): ExitCheck {
+  const missing = missingExteriorBuildings(required, photos, inspectionId, checks);
+  return { allowed: missing.length === 0, missing };
 }
-
-/** Device-only inspections keep the required exterior photo; shared cloud inspections make it optional. */
-export const exteriorPhotoOptional = (inspection: Pick<Inspection, "organizationId">) => inspection.organizationId !== "org-demo";
 
 export function visitDayCount(inspection: Pick<Inspection, "siteVisit">): number {
   const days = new Set(inspection.siteVisit.sessions.map((s) => new Date(s.startedAt).toDateString()));
@@ -71,3 +86,6 @@ export function lastSessionEnd(inspection: Pick<Inspection, "siteVisit">): strin
   const s = inspection.siteVisit.sessions;
   return s.length ? s[s.length - 1].endedAt : null;
 }
+
+/** Shared (cloud) inspections offer "Already Taken With Camera" and exceptions, synced between phones. */
+export const isSharedInspection = (inspection: Pick<Inspection, "organizationId">) => inspection.organizationId !== "org-demo";

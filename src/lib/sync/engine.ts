@@ -16,15 +16,15 @@ import type { DataState } from "../store/store";
 import type { InspectionResult, ThermalImage } from "../domain/types";
 import { newThermalImage } from "../domain/thermal";
 import {
-  NATURAL_KEYS, SERVER_COLUMNS, TABLE_ORDER, extractRecords, sameValue, toCustomer, toEquipment, toEvent, toFacility, toImage,
+  FIRST_WINS, NATURAL_KEYS, OPTIONAL_TABLES, SERVER_COLUMNS, TABLE_ORDER, extractRecords, sameValue, toCustomer, toEquipment, toEvent, toExteriorCheck, toFacility, toImage,
   toInspection, toLocation, toResult, toRoom, type Row, type SyncRecord, type TableName,
 } from "./mapping";
 import {
   backoffMs, decideField, emptySyncData, orderedOps, recordChanges, settleOp, type Conflict, type PendingOp, type SyncData,
 } from "./outbox";
 
-type Shared = Pick<DataState, "customers" | "facilities" | "locations" | "equipment" | "inspections" | "rooms" | "results" | "reviewEvents">;
-const SHARED_KEYS: (keyof Shared)[] = ["customers", "facilities", "locations", "equipment", "inspections", "rooms", "results", "reviewEvents"];
+type Shared = Pick<DataState, "customers" | "facilities" | "locations" | "equipment" | "inspections" | "rooms" | "results" | "reviewEvents" | "exteriorChecks">;
+const SHARED_KEYS: (keyof Shared)[] = ["customers", "facilities", "locations", "equipment", "inspections", "rooms", "results", "reviewEvents", "exteriorChecks"];
 
 export interface EngineDeps {
   sb: SupabaseClient;
@@ -36,6 +36,8 @@ export interface EngineDeps {
   now?: () => number;
   /** Called after outbox / status changes. */
   onChange?: () => void;
+  /** Stable id of this browser, for reporting unsent changes to administrators. */
+  deviceId?: string;
 }
 
 export type SyncPhase = "idle" | "pushing" | "pulling";
@@ -59,10 +61,12 @@ const cursorColumn = (t: TableName) => (t === "review_events" ? "received_at" : 
 
 const isEmptyish = (v: unknown) => v === null || v === undefined || v === "" || (typeof v === "object" && v !== null && Object.keys(v).length === 0);
 
-type ErrKind = "network" | "auth" | "denied" | "parent_missing" | "duplicate" | "other";
+type ErrKind = "network" | "auth" | "denied" | "parent_missing" | "duplicate" | "schema" | "other";
 function classify(err: PostgrestError | null, status?: number): ErrKind {
   if (!err) return "other";
   const code = err.code ?? "";
+  // The app is newer than the database (a migration not applied yet): keep the change queued and retry.
+  if (code === "PGRST204" || code === "42703" || code === "42P01" || code === "PGRST205") return "schema";
   if (!code && (status === 0 || status === undefined || /fetch|network|Failed to fetch|load failed/i.test(err.message))) return "network";
   if (status === 401 || code === "PGRST301" || code === "PGRST303" || /JWT/i.test(err.message)) return "auth";
   if (code === "42501" || status === 403) return "denied";
@@ -148,6 +152,7 @@ export class SyncEngine {
       try {
         await this.push();
         await this.pull();
+        await this.reportOutstanding();
       } finally {
         this.phase = "idle";
         this.running = null;
@@ -211,7 +216,7 @@ export class SyncEngine {
   private fail(op: PendingOp, kind: ErrKind, message: string): ErrKind {
     const cur = this.data.ops[op.key];
     if (!cur) return kind;
-    const transient = kind === "network" || kind === "auth" || kind === "parent_missing";
+    const transient = kind === "network" || kind === "auth" || kind === "parent_missing" || kind === "schema";
     const attempts = cur.attempts + 1;
     const permanent = !transient || (kind === "parent_missing" && attempts > 12);
     const locked = /approved and locked/i.test(message);
@@ -220,6 +225,7 @@ export class SyncEngine {
         : kind === "denied" ? "Not allowed for your account" : message)
       : null;
     this.save({ ...this.data, ops: { ...this.data.ops, [op.key]: { ...cur, attempts, nextAttemptAt: this.now() + backoffMs(attempts), lastError: message, failed } } });
+    if (kind === "schema") { this.lastError = "The database needs an update (a migration) before these changes can upload. They are saved on this device and will retry."; return kind; }
     if (kind === "network") { this.offline = true; this.lastError = "Offline. Changes are saved on this device and will upload automatically."; }
     else if (kind === "auth") { this.lastError = "Session expired. Sign in again to upload changes."; void this.d.sb.auth.refreshSession().catch(() => undefined); }
     else this.lastError = message;
@@ -280,6 +286,16 @@ export class SyncEngine {
     }
     const kind = classify(res.error, res.status);
     if (kind !== "duplicate") return this.fail(op, kind, res.error?.message ?? "Insert failed");
+    if (FIRST_WINS.has(op.table)) {
+      // Another phone already recorded this (e.g. the front photo of the same building): keep theirs, no prompt.
+      const got = await this.fetchRow(op.table, op.id);
+      if (got.err) return this.fail(op, classify(got.err, got.status), got.err.message);
+      const ops = { ...this.data.ops };
+      delete ops[op.key];
+      this.save({ ...this.data, ops, versions: got.row ? { ...this.data.versions, [op.key]: got.row.version as number } : this.data.versions });
+      if (got.row) this.writeRows([{ table: op.table, row: got.row }]);
+      return "ok";
+    }
 
     const natural = NATURAL_KEYS[op.table];
     const isPk = /_pkey/.test(res.error?.message ?? "") || !natural;
@@ -440,6 +456,7 @@ export class SyncEngine {
         const rows: Row[] = [];
         for (let offset = 0; ; offset += PAGE) {
           const r = await sb.from(t).select("*").eq("organization_id", this.orgId).gte(col, since).order(col).order("id").range(offset, offset + PAGE - 1);
+          if (r.error && OPTIONAL_TABLES.has(t) && classify(r.error, r.status) === "schema") break; // database not updated yet
           if (r.error) throw Object.assign(new Error(r.error.message), { kind: classify(r.error, r.status) });
           rows.push(...((r.data ?? []) as Row[]));
           if ((r.data ?? []).length < PAGE) break;
@@ -514,7 +531,7 @@ export class SyncEngine {
     const s = this.d.getState();
     const by = <T extends { id: string }>(list: T[]) => new Map(list.map((x) => [x.id, x]));
     const customers = by(s.customers), facilities = by(s.facilities), locations = by(s.locations), equipment = by(s.equipment);
-    const inspections = by(s.inspections), rooms = by(s.rooms), results = by(s.results), events = by(s.reviewEvents);
+    const inspections = by(s.inspections), rooms = by(s.rooms), results = by(s.results), events = by(s.reviewEvents), checks = by(s.exteriorChecks ?? []);
     const orphans = { ...this.data.orphans };
     const imageRows: Row[] = [];
     let changed = writes.length > 0 || removals.length > 0;
@@ -540,6 +557,7 @@ export class SyncEngine {
         }
         case "thermal_images": imageRows.push(row); break;
         case "review_events": events.set(id, toEvent(row)); break;
+        case "exterior_checks": checks.set(id, toExteriorCheck(row)); break;
         default: break;
       }
     }
@@ -549,7 +567,7 @@ export class SyncEngine {
       results.set(r.id, { ...r, images: upsertImage(r.images, toImage(row), row.sort_order as number, (iid) => this.isPlaceholder(iid)) });
     }
     for (const { table, id } of removals) {
-      const map: Record<string, Map<string, unknown>> = { customers, facilities, locations, equipment, inspections, room_conditions: rooms, results };
+      const map: Record<string, Map<string, unknown>> = { customers, facilities, locations, equipment, inspections, room_conditions: rooms, results, exterior_checks: checks };
       if (table === "thermal_images") {
         for (const r of results.values()) {
           if (!r.images.some((i) => i.id === id)) continue;
@@ -587,6 +605,7 @@ export class SyncEngine {
       customers: [...customers.values()], facilities: [...facilities.values()], locations: [...locations.values()], equipment: [...equipment.values()],
       inspections: [...inspections.values()].filter((i) => !dropped.has(i.id)),
       rooms: [...rooms.values()].filter(keepInsp), results: [...results.values()].filter(keepInsp), reviewEvents: [...events.values()].filter(keepInsp),
+      exteriorChecks: [...checks.values()].filter(keepInsp),
       activeInspectionId: s.activeInspectionId && dropped.has(s.activeInspectionId) ? null : s.activeInspectionId,
     });
   }
@@ -642,6 +661,50 @@ export class SyncEngine {
     const ops: Record<string, PendingOp> = {};
     for (const [k, o] of Object.entries(this.data.ops)) ops[k] = o.failed ? { ...o, failed: null, attempts: 0, nextAttemptAt: 0 } : o;
     this.save({ ...this.data, ops });
+  }
+
+  /** Unsent / failed change counts per inspection on this device (rooms and equipment count for their facility's open jobs). */
+  outstandingByInspection(): Record<string, { pending: number; failed: number }> {
+    const out: Record<string, { pending: number; failed: number }> = {};
+    const st = this.d.getState();
+    const bump = (id: string, failed: boolean) => { const e = (out[id] ??= { pending: 0, failed: 0 }); if (failed) e.failed++; else e.pending++; };
+    for (const o of Object.values(this.data.ops)) {
+      const insp = typeof o.row.inspection_id === "string" ? o.row.inspection_id
+        : o.table === "inspections" ? o.id : o.table === "inspection_assignments" ? o.id.split("|")[0] : null;
+      if (insp) { bump(insp, !!o.failed); continue; }
+      if (o.table === "locations" || o.table === "equipment") {
+        for (const i of st.inspections) if (i.organizationId === this.orgId && i.facilityId === o.row.facility_id && !["Approved", "Report Generated", "Delivered"].includes(i.status)) bump(i.id, !!o.failed);
+      }
+    }
+    return out;
+  }
+
+  /**
+   * Tell administrators which inspections still have changes waiting on this
+   * phone. Sent only when the numbers change (or every few minutes). A phone
+   * without connection cannot report: the administrator sees its last report.
+   */
+  async reportOutstanding(force = false): Promise<void> {
+    if (!this.d.deviceId || this.offline) return;
+    const now = this.now();
+    const counts = this.outstandingByInspection();
+    const prev = this.data.reported ?? {};
+    // Also report "nothing waiting" for this person's open jobs, so the administrator sees a recent all-clear.
+    const mineOpen = this.d.getState().inspections.filter((i) => i.organizationId === this.orgId && i.inspectorIds.includes(this.userId) && ["In Progress", "Needs Review"].includes(i.status)).map((i) => i.id);
+    const ids = new Set([...Object.keys(counts), ...mineOpen, ...Object.entries(prev).filter(([, v]) => v !== "0|0").map(([k]) => k)]);
+    const next: Record<string, string> = {};
+    for (const id of ids) next[id] = `${counts[id]?.pending ?? 0}|${counts[id]?.failed ?? 0}`;
+    const stale = !this.data.reportedAt || now - this.data.reportedAt > 5 * 60_000;
+    const changed = [...ids].some((id) => prev[id] !== next[id]);
+    if (!force && !changed && !stale) return;
+    const known = new Set(this.d.getState().inspections.filter((i) => i.organizationId === this.orgId).map((i) => i.id));
+    const rows = [...ids].filter((id) => known.has(id) && `inspections:${id}` in this.data.versions)
+      .map((id) => ({ device_id: this.d.deviceId!, inspection_id: id, user_id: this.userId, organization_id: this.orgId, pending: counts[id]?.pending ?? 0, failed: counts[id]?.failed ?? 0 }));
+    if (rows.length) {
+      const { error, status } = await this.d.sb.from("sync_reports").upsert(rows, { onConflict: "device_id,inspection_id,user_id" });
+      if (error) { if (classify(error, status) !== "schema") console.warn("sync report not sent:", error.message); return; }
+    }
+    this.save({ ...this.data, reported: { ...prev, ...next }, reportedAt: now });
   }
 
   /** Drop a change the server refused; the server's current value is reloaded onto this device. */

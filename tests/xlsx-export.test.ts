@@ -48,7 +48,7 @@ describe("Excel workbook export", () => {
     const gen = book[0].data;
     expect(gen[0]).toEqual(GENERATOR_HEADERS);
     expect(gen).toHaveLength(1 + 2 + 4 + 1 + 1); // P1 x2, MSB x4, P2 x1, D1 x1
-    for (const row of gen) expect(row).toHaveLength(16);
+    for (const row of gen) expect(row).toHaveLength(15);
     const p1a = gen[1], p1b = gen[2];
     expect([p1a[4], p1a[5], p1a[6], p1a[8], p1a[9]]).toEqual(["Panel P1", "Top Half", 4, 104, 104]);
     expect([p1b[4], p1b[5], p1b[6], p1b[8], p1b[9]]).toEqual(["Panel P1", "Bottom Half", 3, 105, 105]);
