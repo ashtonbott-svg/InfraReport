@@ -95,8 +95,8 @@ function EquipmentCard({ row, onOpen, photoCount, firstPhotoId }: { row: GridRow
   return (
     <button onClick={onOpen} data-result-id={r.id} data-status={status}
       className={cn("flex w-full items-stretch gap-3 rounded-xl border bg-white p-3 text-left shadow-xs active:bg-slate-50",
-        problem ? "border-thermal-300 ring-1 ring-thermal-200" : "border-slate-200")}>
-      <div className={cn("w-1 shrink-0 rounded-full", problem ? "bg-thermal-500" : st.bar)} />
+        problem ? "border-heat-300 ring-1 ring-heat-200" : "border-slate-200")}>
+      <div className={cn("w-1 shrink-0 rounded-full", problem ? "bg-heat-500" : st.bar)} />
       <CardThumb photoId={firstPhotoId} />
       <div className="min-w-0 flex-1">
         <div className="flex items-baseline justify-between gap-2">
@@ -110,7 +110,7 @@ function EquipmentCard({ row, onOpen, photoCount, firstPhotoId }: { row: GridRow
               <span className="truncate text-slate-600">{r.images.length > 1 ? `${i + 1}. ` : ""}{img.component || "No component"}</span>
               <span className={cn("shrink-0 rounded px-1 tabular-nums", img.irImageNumber ? "bg-slate-100 text-slate-700" : "text-slate-400")}>IR {img.irImageNumber || "?"}{img.visualOverridden ? ` / V ${img.visualImageNumber || "?"}` : ""}</span>
               {img.distance ? <span className="shrink-0 rounded bg-slate-100 px-1 tabular-nums text-slate-700">{img.distance} ft</span> : null}
-              {imageHasFinding(img) ? <span className="truncate rounded bg-thermal-100 px-1 font-medium text-thermal-800">{img.possibleCause}</span> : null}
+              {imageHasFinding(img) ? <span className="truncate rounded bg-heat-100 px-1 font-medium text-heat-800">{img.possibleCause}</span> : null}
             </div>
           ))}
         </div>
@@ -368,7 +368,7 @@ function EntryWorkspace() {
                           <span>Equipment {progress.total} · Done {progress.done}</span>
                           <span className={progress.remaining.length ? "font-semibold text-slate-900" : "text-emerald-700"}>{progress.remaining.length ? `${progress.remaining.length} remaining` : current.room.completedAt ? "Room finished" : "All addressed"}</span>
                         </div>
-                        <div className="mt-1 h-2 overflow-hidden rounded-full bg-slate-200"><div className="h-full rounded-full bg-emerald-500" style={{ width: `${Math.round((progress.done / progress.total) * 100)}%` }} /></div>
+                        <div className="mt-1 h-2 overflow-hidden rounded-full bg-slate-200"><div className={progress.done >= progress.total ? "h-full rounded-full bg-emerald-500" : "h-full rounded-full bg-thermal-gradient"} style={{ width: `${Math.round((progress.done / progress.total) * 100)}%` }} /></div>
                       </div>
                       <Button className="h-10 shrink-0" variant={progress.remaining.length || current.room.completedAt ? "secondary" : "dark"} onClick={() => setSheet("checkpoint")}>{current.room.completedAt ? "Next Room" : "Finish Room"}</Button>
                     </div>

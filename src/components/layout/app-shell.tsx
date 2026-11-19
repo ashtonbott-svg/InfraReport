@@ -39,7 +39,7 @@ const NAV = [
 
 const linkCls = (active: boolean) =>
   cn("group flex items-center gap-3 rounded-md px-3 py-2.5 text-sm font-medium transition-colors",
-    active ? "bg-white/10 text-white" : "text-slate-400 hover:bg-white/5 hover:text-slate-100");
+    active ? "bg-thermal-500/25 text-white shadow-[inset_3px_0_0_var(--color-brand-orange)]" : "text-slate-300 hover:bg-white/5 hover:text-white");
 
 const CLOUD_ADMIN_NAV = [
   { href: "/jobs", label: "My Jobs", icon: Briefcase },
@@ -60,7 +60,7 @@ function NavLinks({ onNavigate }: { onNavigate?: () => void }) {
     <nav className="flex flex-1 flex-col gap-0.5 overflow-y-auto px-3">
       {items.map(({ href, label, icon: Icon, preview }) => (
         <Link key={href} href={href} onClick={onNavigate} className={linkCls(isActive(href))}>
-          <Icon className={cn("h-4 w-4", isActive(href) ? "text-thermal-400" : "text-slate-500 group-hover:text-slate-300")} />
+          <Icon className={cn("h-4 w-4", isActive(href) ? "text-heat-400" : "text-slate-400 group-hover:text-slate-200")} />
           <span className="flex-1">{label}</span>
           {preview ? <span className="rounded bg-white/5 px-1.5 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-slate-500">Preview</span> : null}
         </Link>
@@ -88,7 +88,7 @@ function FieldNav({ field, onNavigate }: { field: FieldState; onNavigate?: () =>
     <nav className="flex flex-1 flex-col gap-0.5 overflow-y-auto px-3">
       {items.map(({ href, label, icon: Icon }) => (
         <Link key={href} href={href} onClick={onNavigate} className={linkCls(pathname === href)}>
-          <Icon className={cn("h-4 w-4", pathname === href ? "text-thermal-400" : "text-slate-500")} />{label}
+          <Icon className={cn("h-4 w-4", pathname === href ? "text-heat-400" : "text-slate-400")} />{label}
         </Link>
       ))}
       <button onClick={() => { onNavigate?.(); openExterior("manage"); }} className={cn(linkCls(false), "text-left")}>
@@ -107,9 +107,9 @@ function FieldNav({ field, onNavigate }: { field: FieldState; onNavigate?: () =>
 
 function ActiveCard({ field }: { field: FieldState }) {
   return (
-    <div className="mx-3 mb-3 rounded-lg border border-thermal-500/30 bg-thermal-500/10 p-3">
-      <div className="flex items-center gap-1.5 text-[10px] font-bold uppercase tracking-wider text-thermal-300">
-        <span className="h-1.5 w-1.5 animate-pulse rounded-full bg-thermal-400" />Active Inspection
+    <div className="mx-3 mb-3 rounded-lg border border-heat-400/30 bg-heat-400/10 p-3">
+      <div className="flex items-center gap-1.5 text-[10px] font-bold uppercase tracking-wider text-heat-300">
+        <span className="h-1.5 w-1.5 animate-pulse rounded-full bg-heat-400" />Active Inspection
       </div>
       <div className="mt-1 truncate text-sm font-semibold text-white">{field.facility?.name}</div>
       <div className="truncate text-xs text-slate-400">{field.customer?.name}</div>
@@ -267,8 +267,8 @@ export function AppShell({ children }: { children: ReactNode }) {
   return (
     <div className="flex min-h-full">
       {/* Desktop sidebar */}
-      <aside className="no-print fixed inset-y-0 left-0 z-30 hidden w-60 flex-col bg-slate-950 lg:flex">
-        <div className="flex h-16 items-center px-5"><Link href={fieldMode ? `/inspections/${field!.inspection.id}/entry` : adminView ? "/" : "/jobs"}><Wordmark /></Link></div>
+      <aside className="no-print fixed inset-y-0 left-0 z-30 hidden w-60 flex-col bg-ink lg:flex">
+        <div className="thermal-underline flex h-16 items-center px-5"><Link href={fieldMode ? `/inspections/${field!.inspection.id}/entry` : adminView ? "/" : "/jobs"}><Wordmark /></Link></div>
         {fieldMode ? (
           <>
             <ActiveCard field={field!} />
@@ -277,7 +277,7 @@ export function AppShell({ children }: { children: ReactNode }) {
         ) : (
           <>
             {adminView ? <div className="px-3 pb-4">
-              <Link href="/inspections/new" className="flex items-center justify-center gap-2 rounded-md bg-thermal-600 px-3 py-2.5 text-sm font-semibold text-white shadow-sm hover:bg-thermal-500">
+              <Link href="/inspections/new" className="flex items-center justify-center gap-2 rounded-md bg-heat-400 px-3 py-2.5 text-sm font-semibold text-ink shadow-sm hover:bg-heat-300">
                 <Plus className="h-4 w-4" /> New Inspection
               </Link>
             </div> : null}
@@ -288,32 +288,32 @@ export function AppShell({ children }: { children: ReactNode }) {
       </aside>
 
       {/* Mobile / tablet top bar */}
-      <div className="no-print fixed inset-x-0 top-0 z-30 bg-slate-950 pt-[env(safe-area-inset-top)] lg:hidden">
+      <div className="no-print fixed inset-x-0 top-0 z-30 bg-ink pt-[env(safe-area-inset-top)] lg:hidden">
         {fieldMode ? (
-          <div className="flex h-14 items-center gap-2 px-3">
+          <div className="thermal-underline flex h-14 items-center gap-2 px-3">
             <button onClick={() => setOpen(true)} className="rounded-lg p-2 text-slate-300 hover:bg-white/10" aria-label="Open inspection menu"><Menu className="h-6 w-6" /></button>
             <div className="min-w-0 flex-1 leading-tight">
-              <div className="flex items-center gap-1.5 text-[10px] font-bold uppercase tracking-wider text-thermal-300"><span className="h-1.5 w-1.5 rounded-full bg-thermal-400" />Active Inspection</div>
+              <div className="flex items-center gap-1.5 text-[10px] font-bold uppercase tracking-wider text-heat-300"><span className="h-1.5 w-1.5 rounded-full bg-heat-400" />Active Inspection</div>
               <div className="truncate text-sm font-semibold text-white">{field!.facility?.name}</div>
             </div>
             <SyncBadge compact className="max-w-[38%] shrink-0 truncate text-[11px] leading-tight" />
             <button onClick={openCheckpoint} className="rounded-lg border border-white/15 px-3 py-2 text-sm font-medium text-slate-100 hover:bg-white/10">Exit</button>
           </div>
         ) : (
-          <div className="flex h-14 items-center justify-between px-3">
+          <div className="thermal-underline flex h-14 items-center justify-between px-3">
             <button onClick={() => setOpen(true)} className="rounded-lg p-2 text-slate-300 hover:bg-white/10" aria-label="Open navigation"><Menu className="h-6 w-6" /></button>
             <Link href={adminView ? "/" : "/jobs"}><Wordmark compact /></Link>
             <div className="flex min-w-0 items-center justify-end gap-2">
               <SyncBadge compact className="min-w-0 truncate text-[11px]" />
-              {adminView ? <Link href="/inspections/new" className="shrink-0 rounded-lg bg-thermal-600 p-2 text-white" aria-label="New inspection"><Plus className="h-6 w-6" /></Link> : null}
+              {adminView ? <Link href="/inspections/new" className="shrink-0 rounded-lg bg-heat-400 p-2 text-ink" aria-label="New inspection"><Plus className="h-6 w-6" /></Link> : null}
             </div>
           </div>
         )}
       </div>
       {open ? (
         <div className="fixed inset-0 z-40 lg:hidden">
-          <div className="absolute inset-0 bg-slate-950/60" onClick={() => setOpen(false)} />
-          <aside className="absolute inset-y-0 left-0 flex w-80 max-w-[85vw] flex-col bg-slate-950 pt-[env(safe-area-inset-top)]">
+          <div className="absolute inset-0 bg-ink/60" onClick={() => setOpen(false)} />
+          <aside className="absolute inset-y-0 left-0 flex w-80 max-w-[85vw] flex-col bg-ink pt-[env(safe-area-inset-top)]">
             <div className="flex h-14 items-center justify-between px-4">
               <Wordmark compact />
               <button onClick={() => setOpen(false)} className="rounded-lg p-2 text-slate-400 hover:bg-white/10" aria-label="Close navigation"><X className="h-6 w-6" /></button>

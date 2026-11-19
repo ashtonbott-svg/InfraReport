@@ -5,7 +5,7 @@ import type { InspectionStatus } from "@/lib/domain/types";
 type Tone = "slate" | "orange" | "green" | "blue" | "amber" | "red" | "violet" | "teal";
 const tones: Record<Tone, string> = {
   slate: "bg-slate-100 text-slate-700 ring-slate-200",
-  orange: "bg-thermal-50 text-thermal-700 ring-thermal-200",
+  orange: "bg-heat-50 text-heat-800 ring-heat-200",
   green: "bg-emerald-50 text-emerald-700 ring-emerald-200",
   blue: "bg-sky-50 text-sky-700 ring-sky-200",
   amber: "bg-amber-50 text-amber-800 ring-amber-200",

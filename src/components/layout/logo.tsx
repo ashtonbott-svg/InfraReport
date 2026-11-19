@@ -19,7 +19,7 @@ export function Wordmark({ dark = true, compact }: { dark?: boolean; compact?: b
     <span className="flex items-center gap-2.5" aria-label="InfraReport">
       <LogoMark className={compact ? "h-7 w-7" : "h-8 w-8"} />
       <span className={cn("font-semibold tracking-tight", compact ? "text-base" : "text-[17px]", dark ? "text-white" : "text-slate-900")}>
-        Infra<span className="text-thermal-400">Report</span>
+        Infra<span className="text-heat-400">Report</span>
       </span>
     </span>
   );

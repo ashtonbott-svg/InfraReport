@@ -272,7 +272,7 @@ export function ImageEntryEditor({ idPrefix, image, onPatch, causes, autoFocusIr
       <div className="grid grid-cols-[1fr_auto] items-end gap-2">
         <div>
           <label htmlFor={`${idPrefix}-cause`} className={lbl}>Possible Cause</label>
-          <select id={`${idPrefix}-cause`} className={cn(big, "h-11", finding && "border-thermal-400 font-semibold text-thermal-900")} value={image.possibleCause || POSSIBLE_CAUSE_NONE}
+          <select id={`${idPrefix}-cause`} className={cn(big, "h-11", finding && "border-heat-400 font-semibold text-heat-900")} value={image.possibleCause || POSSIBLE_CAUSE_NONE}
             onChange={(e) => { const r = causeChange({ cause: image.possibleCause, maxTemp: image.maxTemp }, e.target.value); if (r.ok) onPatch({ possibleCause: e.target.value, ...(r.clearMax ? { maxTemp: "" } : {}) }); else e.target.value = image.possibleCause || POSSIBLE_CAUSE_NONE; }}>
             {!causes.includes(image.possibleCause) && image.possibleCause ? <option>{image.possibleCause}</option> : null}
             {causes.map((c) => <option key={c}>{c}</option>)}

@@ -81,7 +81,7 @@ export function JobBoard({ onlyUserId, groups = ["active", "upcoming", "submitte
                   </div>
                   <div className="mt-3">
                     <div className="flex justify-between text-[11px] text-slate-500"><span>{c.eqDone} of {c.eqTotal} equipment</span><span>{c.roomsDone} of {c.roomsTotal} rooms finished</span></div>
-                    <div className="mt-1 h-1.5 overflow-hidden rounded-full bg-slate-100"><div className="h-full rounded-full bg-thermal-500" style={{ width: `${pct}%` }} /></div>
+                    <div className="mt-1 h-1.5 overflow-hidden rounded-full bg-slate-100"><div className={pct >= 100 ? "h-full rounded-full bg-emerald-500" : "h-full rounded-full bg-thermal-gradient"} style={{ width: `${pct}%` }} /></div>
                   </div>
                   {adminActions ? (
                     <div className="mt-4 grid gap-2">

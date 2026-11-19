@@ -175,15 +175,15 @@ export function EquipmentGrid({ rows, inspection, causes, showRoomHeaders, locat
                 {headerAt[i] ? (
                   <tr><td colSpan={10} className="border-b border-slate-200 bg-slate-100/70 px-3 py-1.5 text-xs font-semibold text-slate-600">{locationLabel(location)}</td></tr>
                 ) : null}
-                <tr className={cn("group", problem ? "bg-thermal-50/50" : "hover:bg-slate-50/70", isOpen && "bg-slate-50", !first && "text-slate-700")} data-result-id={first ? r.id : undefined} data-image-id={img.id}>
-                  <td className={cn(cell, "pl-2 text-center", problem ? "border-l-2 border-l-thermal-500" : "border-l-2 border-l-transparent")}>
+                <tr className={cn("group", problem ? "bg-heat-50/60" : "hover:bg-slate-50/70", isOpen && "bg-slate-50", !first && "text-slate-700")} data-result-id={first ? r.id : undefined} data-image-id={img.id}>
+                  <td className={cn(cell, "pl-2 text-center", problem ? "border-l-2 border-l-heat-500" : "border-l-2 border-l-transparent")}>
                     {first ? (
                       <button onClick={() => setExpanded(isOpen ? null : r.id)} className="rounded p-0.5 text-slate-400 hover:bg-slate-200 hover:text-slate-700" aria-label={isOpen ? "Collapse details" : "Expand details"} aria-expanded={isOpen}>
                         {isOpen ? <ChevronDown className="h-4 w-4" /> : <ChevronRight className="h-4 w-4" />}
                       </button>
                     ) : null}
                   </td>
-                  <td className={cn(cell, "sticky left-0 z-[5]", problem ? "bg-thermal-50" : "bg-white group-hover:bg-slate-50")}>
+                  <td className={cn(cell, "sticky left-0 z-[5]", problem ? "bg-heat-50" : "bg-white group-hover:bg-slate-50")}>
                     {first ? (
                       <div className="flex items-center gap-1">
                         <TextCell label="Equipment" row={i} col="name" value={eq?.name ?? ""} onCommit={(v) => eq && updateEquipment(eq.id, { name: v })} className="font-medium" />
@@ -210,7 +210,7 @@ export function EquipmentGrid({ rows, inspection, causes, showRoomHeaders, locat
                     ) : null}
                   </td>
                   <td className={cell}>
-                    <select className={cn("grid-input", problem && "font-medium text-thermal-800")} value={img.possibleCause || POSSIBLE_CAUSE_NONE} aria-label="Possible cause" data-grid-row={i} data-grid-col="cause"
+                    <select className={cn("grid-input", problem && "font-medium text-heat-800")} value={img.possibleCause || POSSIBLE_CAUSE_NONE} aria-label="Possible cause" data-grid-row={i} data-grid-col="cause"
                       onChange={(e) => updateImage(r.id, img.id, { possibleCause: e.target.value })} onKeyDown={(e) => gridKeyDown(e, i, "cause")}>
                       {!causes.includes(img.possibleCause) && img.possibleCause ? <option>{img.possibleCause}</option> : null}
                       {causes.map((c) => <option key={c}>{c}</option>)}

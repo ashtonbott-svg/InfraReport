@@ -6,11 +6,11 @@ type Size = "sm" | "md" | "lg" | "icon";
 
 const variants: Record<Variant, string> = {
   primary: "bg-thermal-600 text-white hover:bg-thermal-700 shadow-sm focus-visible:ring-thermal-500",
-  secondary: "bg-white text-slate-800 border border-slate-300 hover:bg-slate-50 shadow-sm focus-visible:ring-slate-400",
-  ghost: "text-slate-600 hover:bg-slate-100 hover:text-slate-900 focus-visible:ring-slate-400",
+  secondary: "bg-white text-slate-800 border border-slate-300 hover:border-thermal-300 hover:bg-thermal-50 shadow-sm focus-visible:ring-thermal-500",
+  ghost: "text-slate-600 hover:bg-thermal-50 hover:text-thermal-800 focus-visible:ring-thermal-500",
   danger: "bg-white text-red-700 border border-red-200 hover:bg-red-50 focus-visible:ring-red-400",
   destructive: "bg-red-600 text-white hover:bg-red-700 shadow-sm focus-visible:ring-red-500",
-  dark: "bg-slate-900 text-white hover:bg-slate-800 focus-visible:ring-slate-500",
+  dark: "bg-ink text-white hover:bg-ink-soft focus-visible:ring-thermal-500",
 };
 const sizes: Record<Size, string> = {
   sm: "h-8 px-2.5 text-xs gap-1.5",
