@@ -192,7 +192,7 @@ export default function ImportInventoryPage() {
                 </div>
                 {pdf.lines.length ? (
                   <div>
-                    <button className="text-xs font-medium text-thermal-700 hover:underline" onClick={() => setShowText(!showText)}>{showText ? "Hide" : "Show"} extracted PDF text</button>
+                    <button className="text-xs font-medium text-heat-700 hover:underline" onClick={() => setShowText(!showText)}>{showText ? "Hide" : "Show"} extracted PDF text</button>
                     {showText ? <pre className="mt-2 max-h-72 overflow-auto rounded bg-slate-50 p-3 text-[11px] leading-relaxed text-slate-700">{pdf.lines.map((l) => `p${l.page}  ${l.text}`).join("\n")}</pre> : null}
                   </div>
                 ) : null}
@@ -264,7 +264,7 @@ export default function ImportInventoryPage() {
                       const bad = r.include && (!r.name.trim() || !r.room.trim());
                       return (
                         <tr key={r.id} className={cn(!r.include && "bg-slate-50 text-slate-400", bad && "bg-red-50")} data-testid="import-row">
-                          <td className="border-b border-slate-100 px-2 text-center"><input type="checkbox" className="h-4 w-4 accent-thermal-600" checked={r.include} onChange={(e) => update(r.id, { include: e.target.checked })} aria-label="Include row" /></td>
+                          <td className="border-b border-slate-100 px-2 text-center"><input type="checkbox" className="h-4 w-4 accent-heat-600" checked={r.include} onChange={(e) => update(r.id, { include: e.target.checked })} aria-label="Include row" /></td>
                           <td className="border-b border-slate-100 px-2 text-xs tabular-nums text-slate-400" title={r.source}>{rows.indexOf(r) + 1}</td>
                           <td className="border-b border-slate-100 px-1"><input className="grid-input" list="imp-buildings" value={r.building} onChange={(e) => update(r.id, { building: e.target.value })} aria-label="Building" /></td>
                           <td className="border-b border-slate-100 px-1"><input className="grid-input" list="imp-rooms" value={r.room} onChange={(e) => update(r.id, { room: e.target.value })} aria-label="Room" /></td>

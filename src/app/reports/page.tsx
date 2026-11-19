@@ -64,7 +64,7 @@ export default function ReportsPage() {
             {rows.map((r) => (
               <tr key={r.inspection.id} className="hover:bg-slate-50">
                 <td className={td}>
-                  <Link href={`/inspections/${r.inspection.id}/review`} className="font-medium text-slate-900 hover:text-thermal-700">{r.facility}</Link>
+                  <Link href={`/inspections/${r.inspection.id}/review`} className="font-medium text-slate-900 hover:text-heat-700">{r.facility}</Link>
                   <div className="text-xs text-slate-500">{r.customer} · {formatDate(r.inspection.date)}</div>
                 </td>
                 <td className={td}><StatusBadge status={r.inspection.status} /></td>

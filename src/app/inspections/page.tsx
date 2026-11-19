@@ -59,15 +59,15 @@ function InspectionsList() {
             <tbody>
               {rows.map(({ i, customer, facility, inspector, count }) => (
                 <tr key={i.id} className="hover:bg-slate-50">
-                  <td className={`${td} whitespace-nowrap`}><Link href={`/inspections/${i.id}`} className="font-medium text-slate-900 hover:text-thermal-700">{formatDate(i.date)}</Link></td>
+                  <td className={`${td} whitespace-nowrap`}><Link href={`/inspections/${i.id}`} className="font-medium text-slate-900 hover:text-heat-700">{formatDate(i.date)}</Link></td>
                   <td className={td}><div className="font-medium text-slate-800">{facility}</div><div className="text-xs text-slate-500">{customer}</div></td>
                   <td className={`${td} whitespace-nowrap`}>{inspector}</td>
                   <td className={`${td} tabular-nums`}>{count}</td>
                   <td className={td}><StatusBadge status={i.status} /></td>
                   <td className={`${td} whitespace-nowrap text-right text-xs`}>
-                    <Link href={`/inspections/${i.id}/entry`} className="font-medium text-thermal-700 hover:underline">Entry</Link>
+                    <Link href={`/inspections/${i.id}/entry`} className="font-medium text-heat-700 hover:underline">Entry</Link>
                     <span className="mx-2 text-slate-300">|</span>
-                    <Link href={`/inspections/${i.id}/review`} className="font-medium text-thermal-700 hover:underline">Review</Link>
+                    <Link href={`/inspections/${i.id}/review`} className="font-medium text-heat-700 hover:underline">Review</Link>
                   </td>
                 </tr>
               ))}

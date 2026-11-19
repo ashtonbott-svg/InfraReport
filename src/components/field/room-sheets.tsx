@@ -18,7 +18,7 @@ export interface RoomInfo {
   count: number;
 }
 
-const bigInput = "h-12 w-full rounded-lg border border-slate-300 bg-white px-3 text-base text-slate-900 shadow-sm placeholder:text-slate-400 focus:border-thermal-500 focus:outline-none focus:ring-2 focus:ring-thermal-500/20";
+const bigInput = "h-12 w-full rounded-lg border border-slate-300 bg-white px-3 text-base text-slate-900 shadow-sm placeholder:text-slate-400 focus:border-heat-500 focus:outline-none focus:ring-2 focus:ring-heat-500/20";
 
 function NumField({ id, label, unit, value, onChange }: { id: string; label: string; unit: string; value: string; onChange: (v: string) => void }) {
   const bad = value !== "" && !isNumericText(normalizeNumericInput(value));

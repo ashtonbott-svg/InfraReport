@@ -75,7 +75,7 @@ export default function ImagesPage() {
         <span>
           <span className="block font-mono text-xs text-slate-700">{img.fileName}</span>
           <button onClick={() => updateImage(img.id, { verified: !img.verified })} className="text-[11px] font-medium">
-            {img.verified ? <span className="inline-flex items-center gap-1 text-emerald-700"><CheckCircle2 className="h-3 w-3" />Verified</span> : <span className="text-thermal-700 hover:underline">Mark verified</span>}
+            {img.verified ? <span className="inline-flex items-center gap-1 text-emerald-700"><CheckCircle2 className="h-3 w-3" />Verified</span> : <span className="text-heat-700 hover:underline">Mark verified</span>}
           </button>
         </span>
       </span>
@@ -109,7 +109,7 @@ export default function ImagesPage() {
 
       <div className="grid gap-6 xl:grid-cols-[minmax(0,1fr)_360px]">
         <Card>
-          <CardHeader title="Equipment to image matching" actions={<Link href={`/inspections/${inspectionId}/entry`} className="text-xs font-medium text-thermal-700 hover:underline">Edit image numbers</Link>} />
+          <CardHeader title="Equipment to image matching" actions={<Link href={`/inspections/${inspectionId}/entry`} className="text-xs font-medium text-heat-700 hover:underline">Edit image numbers</Link>} />
           {rows.length === 0 ? <EmptyState title="No equipment rows" /> : (
             <Table>
               <thead><tr><th className={th}>Equipment</th><th className={th}>Component</th><th className={th}>Thermal (IR #)</th><th className={th}>Visual #</th></tr></thead>

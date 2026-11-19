@@ -127,7 +127,7 @@ export default function FacilityDetailPage() {
               <ul className="divide-y divide-slate-100">
                 {inspections.map((i) => (
                   <li key={i.id} className="flex items-center justify-between px-5 py-2.5 text-sm">
-                    <Link href={`/inspections/${i.id}`} className="font-medium hover:text-thermal-700">{formatDate(i.date)}</Link>
+                    <Link href={`/inspections/${i.id}`} className="font-medium hover:text-heat-700">{formatDate(i.date)}</Link>
                     <StatusBadge status={i.status} />
                   </li>
                 ))}

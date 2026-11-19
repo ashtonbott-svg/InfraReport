@@ -95,7 +95,7 @@ export default function DashboardPage() {
 
       <div className="mt-6 grid grid-cols-1 gap-6 xl:grid-cols-3">
         <Card className="xl:col-span-2">
-          <CardHeader title="Active inspections" actions={<Link href="/inspections" className="text-xs font-medium text-thermal-700 hover:underline">View all</Link>} />
+          <CardHeader title="Active inspections" actions={<Link href="/inspections" className="text-xs font-medium text-heat-700 hover:underline">View all</Link>} />
           {active.length === 0 ? (
             <EmptyState title="No open inspections" description="Start an inspection to begin recording equipment." action={<Link href="/inspections/new"><Button variant="primary">New Inspection</Button></Link>} />
           ) : (
@@ -116,7 +116,7 @@ export default function DashboardPage() {
                       <td className={`${td} tabular-nums`}>{count}</td>
                       <td className={td}><StatusBadge status={i.status} /></td>
                       <td className={`${td} text-right`}>
-                        <Link href={`/inspections/${i.id}/entry`} className="whitespace-nowrap text-xs font-medium text-thermal-700 hover:underline">Open entry</Link>
+                        <Link href={`/inspections/${i.id}/entry`} className="whitespace-nowrap text-xs font-medium text-heat-700 hover:underline">Open entry</Link>
                       </td>
                     </tr>
                   );

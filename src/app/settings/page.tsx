@@ -67,7 +67,7 @@ export default function SettingsPage() {
               <Input id="s-em" className="max-w-32" inputMode="decimal" value={s.defaultEmissivity} onChange={(e) => updateOrgSettings({ defaultEmissivity: e.target.value })} />
             </Field>
             <label className="flex items-start gap-2.5 text-sm">
-              <input type="checkbox" className="mt-0.5 h-4 w-4 accent-thermal-600" checked={s.csvIncludeBom} onChange={(e) => updateOrgSettings({ csvIncludeBom: e.target.checked })} />
+              <input type="checkbox" className="mt-0.5 h-4 w-4 accent-heat-600" checked={s.csvIncludeBom} onChange={(e) => updateOrgSettings({ csvIncludeBom: e.target.checked })} />
               <span><span className="font-medium">Include UTF-8 byte order mark in CSV</span><br /><span className="text-xs text-slate-500">Recommended so Excel shows “Can’t Open Item” correctly. Turn off only if your Generator macro reads the first header cell incorrectly.</span></span>
             </label>
           </CardBody>

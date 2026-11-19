@@ -61,7 +61,7 @@ export default function CustomersPage() {
                 const last = inspections.filter((i) => i.customerId === c.id).sort((a, b) => b.date.localeCompare(a.date))[0];
                 return (
                   <tr key={c.id} className="hover:bg-slate-50">
-                    <td className={td}><Link href={`/customers/${c.id}`} className="font-medium text-slate-900 hover:text-thermal-700">{c.name}</Link></td>
+                    <td className={td}><Link href={`/customers/${c.id}`} className="font-medium text-slate-900 hover:text-heat-700">{c.name}</Link></td>
                     <td className={td}><div>{c.contactName}</div><div className="text-xs text-slate-500">{c.contactEmail}</div></td>
                     <td className={`${td} tabular-nums`}>{facilities.filter((f) => f.customerId === c.id).length}</td>
                     <td className={`${td} whitespace-nowrap`}>{last ? formatDate(last.date) : <span className="text-slate-400">None</span>}</td>

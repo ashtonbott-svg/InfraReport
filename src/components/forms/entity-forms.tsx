@@ -89,8 +89,8 @@ export function FacilityFormModal({ open, onClose, facility, customerId, onSaved
     return (
       <Modal open={open} onClose={() => { onSaved?.(created); onClose(); }} title="Equipment list" description={`How do you want to set up ${v.name.trim()}'s equipment?`}>
         <div className="grid gap-3">
-          <button className="flex items-start gap-3 rounded-xl border-2 border-thermal-500 bg-thermal-50 p-4 text-left hover:bg-thermal-100" onClick={() => { onClose(); router.push(`/facilities/${created}/import`); }}>
-            <FileUp className="mt-0.5 h-6 w-6 shrink-0 text-thermal-700" />
+          <button className="flex items-start gap-3 rounded-xl border-2 border-heat-500 bg-heat-50 p-4 text-left hover:bg-heat-100" onClick={() => { onClose(); router.push(`/facilities/${created}/import`); }}>
+            <FileUp className="mt-0.5 h-6 w-6 shrink-0 text-heat-700" />
             <span><span className="block text-base font-semibold text-slate-900">Import Existing Equipment List</span><span className="text-sm text-slate-600">From a previous inspection report (PDF), Excel or CSV. You review every row before it is saved.</span></span>
           </button>
           <button className="flex items-start gap-3 rounded-xl border border-slate-200 p-4 text-left hover:bg-slate-50" onClick={() => { onSaved?.(created); onClose(); }}>

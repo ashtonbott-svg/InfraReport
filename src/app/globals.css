@@ -7,8 +7,9 @@
 
 /*
  * Infinite Infrared brand colors. Change colors here; components use the
- * scales below (thermal = primary purple, heat = orange accent / findings,
- * ink = navigation) and the thermal gradient utilities.
+ * scales below (heat = primary orange: buttons, actions, links, focus;
+ * thermal = purple: selected states and secondary accents; ink = navigation)
+ * and the thermal gradient utilities.
  *   Purple #530288 · Orange #F87138 · Yellow #FFD130 · Pale Yellow #FBEF81
  */
 @theme {
@@ -17,7 +18,7 @@
   --color-brand-yellow: #ffd130;
   --color-brand-pale: #fbef81;
 
-  /* Primary: buttons, selection, focus, links (purple; white text on 600+ meets 7:1+). */
+  /* Purple: selected states and secondary accents. */
   --color-thermal-50: #f8f1fd;
   --color-thermal-100: #efe0fb;
   --color-thermal-200: #dfc2f6;
@@ -29,14 +30,15 @@
   --color-thermal-800: #43036d;
   --color-thermal-900: #350457;
 
-  /* Accent and thermal findings (orange); dark text on 300-400. */
+  /* Primary orange: buttons and actions. White text on 600 = 5.1:1, links in 700 = 6.3:1;
+     the bright brand orange (400) carries dark text (ink) at 6.7:1. Also thermal findings. */
   --color-heat-50: #fff5ee;
   --color-heat-100: #ffe6d5;
   --color-heat-200: #fec9a8;
   --color-heat-300: #fba274;
   --color-heat-400: #f87138;
   --color-heat-500: #ef5718;
-  --color-heat-600: #d4410c;
+  --color-heat-600: #c93d0b;
   --color-heat-700: #b0330e;
   --color-heat-800: #8d2b13;
   --color-heat-900: #722613;
@@ -79,10 +81,21 @@ body {
 
 /* Compact grid inputs for the equipment entry workspace */
 .grid-input {
-  @apply h-8 w-full min-w-0 rounded border border-transparent bg-transparent px-2 text-sm text-slate-900 placeholder:text-slate-400 hover:border-slate-200 focus:border-thermal-500 focus:bg-white focus:outline-none focus:ring-2 focus:ring-thermal-500/20;
+  @apply h-8 w-full min-w-0 rounded border border-transparent bg-transparent px-2 text-sm text-slate-900 placeholder:text-slate-400 hover:border-slate-200 focus:border-heat-500 focus:bg-white focus:outline-none focus:ring-2 focus:ring-heat-500/20;
 }
 .grid-input.inherited { @apply italic text-slate-500; }
 select.grid-input { @apply pr-6; }
+
+/* iPhone / iPad: Safari zooms the page when a focused field's text is under 16px
+   (and the zoomed page then looks wider than the screen). On touch devices every
+   text field uses at least 16px. Pinch zoom stays available for accessibility. */
+@media (hover: none) and (pointer: coarse) {
+  input:not([type="checkbox"]):not([type="radio"]):not([type="range"]):not([type="file"]),
+  select,
+  textarea {
+    font-size: max(16px, 1em) !important;
+  }
+}
 
 @media print {
   .no-print { display: none !important; }

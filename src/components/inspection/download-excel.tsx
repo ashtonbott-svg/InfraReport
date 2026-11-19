@@ -92,7 +92,7 @@ export function DownloadExcelButton({ inspectionId, label = "Download Excel", ..
       <Modal open={open} onClose={() => setOpen(false)} title="Download Excel" description="Same inspection data, two layouts. Downloading does not change the inspection.">
         <div className="grid gap-3">
           <button type="button" onClick={() => void go("infinite")} disabled={!!busy} data-testid={`${testId}-infinite`}
-            className="rounded-xl border-2 border-thermal-500 bg-thermal-50 p-4 text-left hover:bg-thermal-100 disabled:opacity-60">
+            className="rounded-xl border-2 border-heat-500 bg-heat-50 p-4 text-left hover:bg-heat-100 disabled:opacity-60">
             <span className="block text-base font-semibold text-slate-900">{busy === "infinite" ? "Preparing…" : FORMAT_LABEL.infinite}</span>
             <span className="text-sm text-slate-600">15 columns for your Generator, with Max Temp. Generator Import, Equipment Summary and Column Map sheets.</span>
           </button>

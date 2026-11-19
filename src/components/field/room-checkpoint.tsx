@@ -63,7 +63,7 @@ function CondField({ id, label, value, missing, required, onChange }: { id: stri
     <label htmlFor={id} className="block">
       <span className={cn("mb-1 block text-xs font-semibold", missing ? (required ? "text-red-800" : "text-amber-800") : "text-slate-700")}>{label}{missing ? (required ? " *" : " (missing)") : ""}</span>
       <input id={id} inputMode="decimal" autoComplete="off" value={value} onChange={(e) => onChange(e.target.value)}
-        className={cn("h-12 w-full rounded-lg border-2 bg-white px-2 text-lg font-semibold tabular-nums focus:outline-none focus:ring-2 focus:ring-thermal-500/20", missing && required ? "border-red-400" : "border-slate-300")} />
+        className={cn("h-12 w-full rounded-lg border-2 bg-white px-2 text-lg font-semibold tabular-nums focus:outline-none focus:ring-2 focus:ring-heat-500/20", missing && required ? "border-red-400" : "border-slate-300")} />
     </label>
   );
 }

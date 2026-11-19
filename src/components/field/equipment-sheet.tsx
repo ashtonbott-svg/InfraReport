@@ -20,7 +20,7 @@ import type { Equipment, Inspection, InspectionResult, InspectionRoomConditions,
 /** Kept for existing imports: next sequential names in a room. */
 export const nameSuggestions = nextSequentialNames;
 
-const big = "h-12 w-full rounded-lg border border-slate-300 bg-white px-3 text-base text-slate-900 shadow-sm placeholder:text-slate-400 focus:border-thermal-500 focus:outline-none focus:ring-2 focus:ring-thermal-500/20";
+const big = "h-12 w-full rounded-lg border border-slate-300 bg-white px-3 text-base text-slate-900 shadow-sm placeholder:text-slate-400 focus:border-heat-500 focus:outline-none focus:ring-2 focus:ring-heat-500/20";
 const lbl = "mb-1 block text-sm font-medium text-slate-700";
 const TYPES = [...EQUIPMENT_PRESETS.map((p) => p.type), OTHER_EQUIPMENT_TYPE];
 /** Keeps the keyboard open when a suggestion chip is tapped. */
@@ -211,7 +211,7 @@ function causeChange(current: { cause: string; maxTemp: string }, next: string):
 /* -------------------------------------------------------------------------- */
 /* Thermal image entry: Component, IR # | Distance, auto Visual #, finding     */
 /* -------------------------------------------------------------------------- */
-const numBig = "h-14 w-full rounded-xl border-2 border-slate-300 bg-white px-3 text-2xl font-semibold tabular-nums text-slate-900 shadow-sm placeholder:text-base placeholder:font-normal placeholder:text-slate-400 focus:border-thermal-500 focus:outline-none focus:ring-2 focus:ring-thermal-500/20";
+const numBig = "h-14 w-full rounded-xl border-2 border-slate-300 bg-white px-3 text-2xl font-semibold tabular-nums text-slate-900 shadow-sm placeholder:text-base placeholder:font-normal placeholder:text-slate-400 focus:border-heat-500 focus:outline-none focus:ring-2 focus:ring-heat-500/20";
 
 export function ImageEntryEditor({ idPrefix, image, onPatch, causes, autoFocusIr }: {
   idPrefix: string; image: ThermalImage; onPatch: (p: Partial<ThermalImage>) => void; causes: string[]; autoFocusIr?: boolean;

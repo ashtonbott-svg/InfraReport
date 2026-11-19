@@ -48,7 +48,7 @@ export default function CustomerDetailPage() {
               <tbody>
                 {facilities.map((f) => (
                   <tr key={f.id} className="hover:bg-slate-50">
-                    <td className={td}><Link href={`/facilities/${f.id}`} className="font-medium text-slate-900 hover:text-thermal-700">{f.name}</Link></td>
+                    <td className={td}><Link href={`/facilities/${f.id}`} className="font-medium text-slate-900 hover:text-heat-700">{f.name}</Link></td>
                     <td className={`${td} text-xs`}>{[f.address, f.city, f.state].filter(Boolean).join(", ")}</td>
                     <td className={`${td} tabular-nums`}>{equipment.filter((e) => e.facilityId === f.id).length}</td>
                   </tr>
@@ -65,7 +65,7 @@ export default function CustomerDetailPage() {
               <tbody>
                 {inspections.map((i) => (
                   <tr key={i.id} className="hover:bg-slate-50">
-                    <td className={td}><Link href={`/inspections/${i.id}`} className="font-medium hover:text-thermal-700">{formatDate(i.date)}</Link></td>
+                    <td className={td}><Link href={`/inspections/${i.id}`} className="font-medium hover:text-heat-700">{formatDate(i.date)}</Link></td>
                     <td className={td}>{facilities.find((f) => f.id === i.facilityId)?.name}</td>
                     <td className={td}><StatusBadge status={i.status} /></td>
                   </tr>

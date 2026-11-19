@@ -359,7 +359,7 @@ function EntryWorkspace() {
                   <button onClick={() => setSheet("conditions")} className="mt-1 flex w-full items-center gap-2 rounded-lg px-1 py-1.5 text-left text-sm text-slate-600 active:bg-slate-100">
                     <SlidersHorizontal className="h-4 w-4 shrink-0 text-slate-400" />
                     <span className="flex-1 truncate">{conditionSummary(current.room)}</span>
-                    <span className="text-xs font-medium text-thermal-700">Edit</span>
+                    <span className="text-xs font-medium text-heat-700">Edit</span>
                   </button>
                   {progress.total ? (
                     <div className="mt-2 flex items-center gap-3 rounded-lg bg-slate-50 px-3 py-2" data-testid="room-progress">

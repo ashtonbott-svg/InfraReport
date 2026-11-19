@@ -113,7 +113,7 @@ function NewInspectionForm() {
                 <>
                   <p className="text-slate-600">This facility has <strong>{plural(roomCount, "room")}</strong> and <strong>{plural(eqCount, "active equipment item")}</strong>{last ? <> from the {formatDate(last.date)} inspection and earlier</> : null}.</p>
                   <label className="flex cursor-pointer items-start gap-2.5 rounded-md border border-slate-200 p-3 hover:bg-slate-50">
-                    <input type="checkbox" className="mt-0.5 h-4 w-4 accent-thermal-600" checked={carryForward} onChange={(e) => setCarryForward(e.target.checked)} />
+                    <input type="checkbox" className="mt-0.5 h-4 w-4 accent-heat-600" checked={carryForward} onChange={(e) => setCarryForward(e.target.checked)} />
                     <span><span className="font-medium text-slate-900">Carry forward equipment list</span><br /><span className="text-xs text-slate-500">Creates a blank result row for every active item. Temperatures, image numbers, and findings are never copied.</span></span>
                   </label>
                 </>
@@ -121,7 +121,7 @@ function NewInspectionForm() {
             </CardBody>
           </Card>
           <label className="flex cursor-pointer items-start gap-2.5 rounded-md border border-slate-200 bg-white p-3 text-sm hover:bg-slate-50">
-            <input type="checkbox" className="mt-0.5 h-5 w-5 accent-thermal-600" checked={startNow} onChange={(e) => setStartNow(e.target.checked)} />
+            <input type="checkbox" className="mt-0.5 h-5 w-5 accent-heat-600" checked={startNow} onChange={(e) => setStartNow(e.target.checked)} />
             <span><span className="font-medium text-slate-900">I&apos;m on site now</span><br /><span className="text-xs text-slate-500">Starts the site visit and asks for the building exterior photo. Leave unchecked to prepare the job in advance.</span></span>
           </label>
           <Button variant="primary" size="lg" type="submit" className="h-12 w-full justify-center text-base" disabled={!valid}>{startNow ? "Create & Start Site Visit" : "Create Inspection"}<ArrowRight className="h-4 w-4" /></Button>
