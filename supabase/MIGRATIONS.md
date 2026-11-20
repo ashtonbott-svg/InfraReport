@@ -15,7 +15,7 @@ and that is what decides whether a file has been applied:
 | `20261118000300_event_received_at.sql` | 20261118224420 | applied manually, recorded only |
 | `20261118000400_approval_lock.sql` | 20261118224422 | applied manually, recorded only |
 | `20261119000500_field_test_improvements.sql` | 20261118224430 | applied through the Management API |
-| `20261121000600_room_moves.sql` | (filled in when applied) | applied with `scripts/supabase-migrate.sh` |
+| `20261121000600_room_moves.sql` | 20261120211248 | applied with `scripts/supabase-migrate.sh` (2026-11-20) |
 
 Rules:
 
