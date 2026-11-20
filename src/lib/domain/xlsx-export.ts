@@ -9,8 +9,8 @@
  * Sheet "Column Map": where each field goes in the Generator workbook
  * (B..N and R; formula columns O, P, Q are never written).
  *
- * IRT (Infrared Team, 14 columns, one sheet "Data"): the same rows without
- * Max Temp, no summary, no column map, no branding.
+ * IRT (Infrared Team, 13 columns, one sheet "Data"): the same rows without
+ * Max Temp and Visual Image Number, no summary, no column map, no branding.
  *
  * This file only builds sheet data; it does not run Excel macros or produce
  * the finished report.
@@ -115,14 +115,14 @@ export function buildWorkbook(ds: ExportDataset, meta: WorkbookMeta): XSheet[] {
   return [generator, summary, map];
 }
 
-/** IRT (Infrared Team): one plain "Data" sheet, 14 columns, no Max Temp, no branding or metadata. */
+/** IRT (Infrared Team): one plain "Data" sheet, 13 columns, no Max Temp or Visual Image Number, no branding or metadata. */
 export function buildIrtWorkbook(ds: ExportDataset): XSheet[] {
   const bold = (v: string): XCell => ({ value: v, type: "String", fontWeight: "bold" });
   const rows = flattenImages(ds).map(({ result, image }) => toIrtRow(buildGeneratorRow(result, ds, image)));
   return [{
     sheet: "Data",
     data: [IRT_HEADERS.map(bold), ...rows.map((row) => row.map((v, i) => typedCell(IRT_HEADERS[i], v)))],
-    columns: [12, 30, 10, 14, 28, 20, 10, 30, 14, 16, 11, 13, 34, 40].map((width) => ({ width })),
+    columns: [12, 30, 10, 14, 28, 20, 10, 30, 14, 11, 13, 34, 40].map((width) => ({ width })),
     stickyRowsCount: 1,
   }];
 }

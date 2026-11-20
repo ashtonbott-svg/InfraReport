@@ -65,7 +65,7 @@ export async function downloadInspectionExcel(inspectionId: string, format: Expo
 
 /**
  * Download Excel: choose Infinite Infrared (15 columns, Generator Import +
- * Equipment Summary + Column Map) or IRT (14 columns, one Data sheet). Same
+ * Equipment Summary + Column Map) or IRT (13 columns, one Data sheet). Same
  * data, one row per thermal image entry. Available in every status.
  */
 export function DownloadExcelButton({ inspectionId, label = "Download Excel", ...props }: { inspectionId: string; label?: string } & Omit<ButtonProps, "onClick">) {
@@ -99,7 +99,7 @@ export function DownloadExcelButton({ inspectionId, label = "Download Excel", ..
           <button type="button" onClick={() => void go("irt")} disabled={!!busy} data-testid={`${testId}-irt`}
             className="rounded-xl border border-slate-300 bg-white p-4 text-left hover:bg-slate-50 disabled:opacity-60">
             <span className="block text-base font-semibold text-slate-900">{busy === "irt" ? "Preparing…" : FORMAT_LABEL.irt}</span>
-            <span className="text-sm text-slate-600">14 columns for Infrared Team, no Max Temp. One Data sheet, no branding.</span>
+            <span className="text-sm text-slate-600">13 columns for Infrared Team, no Max Temp or Visual Image Number. One Data sheet, no branding.</span>
           </button>
         </div>
       </Modal>

@@ -321,7 +321,7 @@ const LEGACY = {
     const sheets = await readXlsx(new Blob([require("fs").readFileSync(file)]));
     if (sheets.map((x) => x.sheet).join("|") !== "Data") throw new Error("IRT sheets: " + sheets.map((x) => x.sheet));
     const d = sheets[0].data;
-    if (d[0].length !== 14 || d[0].includes("Max Temp") || d[0].includes("Confidence")) throw new Error("IRT columns: " + d[0].join("|"));
+    if (d[0].length !== 13 || d[0].includes("Max Temp") || d[0].includes("Visual Image Number") || d[0].includes("Confidence")) throw new Error("IRT columns: " + d[0].join("|"));
     if (/InfraReport|Infinite Infrared/.test(JSON.stringify(d))) throw new Error("IRT workbook contains branding");
     const col = (h) => d[0].indexOf(h);
     return d.slice(1).map((r) => `${r[col("Location")]}|${r[col("Equipment")]}|${r[col("IR Image Number")]}`).sort();
@@ -388,7 +388,7 @@ const LEGACY = {
   const [dlIrt] = await Promise.all([A.page.waitForEvent("download"), A.page.getByTestId("card-download-xlsx-irt").click()]);
   const irtRows = await readIrt(dlIrt);
   if (JSON.stringify(irtRows) !== JSON.stringify(expected)) throw new Error("IRT rows: " + JSON.stringify(irtRows));
-  ok("7c. before approval: Infinite Infrared (15 columns, 3 sheets, InfraReport_ filename) and IRT (14 columns, one Data sheet, no Max Temp, no branding, Customer_Facility_Date filename); every view of every item from both phones, new order, admin edit and the typed note");
+  ok("7c. before approval: Infinite Infrared (15 columns, 3 sheets, InfraReport_ filename) and IRT (13 columns, one Data sheet, no Max Temp or Visual Image Number, no branding, Customer_Facility_Date filename); every view of every item from both phones, new order, admin edit and the typed note");
 
   // Approve, then download again from the inspection header.
   await A.page.goto(BASE + `/inspections/${inspId}/review`);

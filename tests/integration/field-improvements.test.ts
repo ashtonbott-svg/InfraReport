@@ -50,8 +50,10 @@ run("Field test improvements (real Supabase, two phones)", () => {
     const inf = buildWorkbook(ashton.dataset(inspId), { customer: "AMNT", facility: "Mansfield", inspectionDate: "2026-11-18", thermographers: "", generatedAt: new Date() })[0].data;
     const irt = buildIrtWorkbook(ashton.dataset(inspId))[0].data;
     expect(inf.find((r) => r[4]?.value === "Disconnect L2")![14]?.value).toBe("RC 6, A Phase, Class 2");
-    expect(irt.find((r) => r[4]?.value === "Disconnect L2")![13]?.value).toBe("RC 6, A Phase, Class 2");
+    expect(irt.find((r) => r[4]?.value === "Disconnect L2")![12]?.value).toBe("RC 6, A Phase, Class 2");
     expect(irt[0].map((c) => c?.value)).not.toContain("Max Temp");
+    expect(irt[0].map((c) => c?.value)).not.toContain("Visual Image Number");
+    expect(irt[0]).toHaveLength(13);
   });
 
   it("an administrator's correction to a note syncs back to the technician", async () => {

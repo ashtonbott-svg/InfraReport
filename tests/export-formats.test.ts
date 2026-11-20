@@ -8,6 +8,8 @@ import { sampleDataset } from "./xlsx-export.test";
 
 const meta = { customer: "AMNT", facility: "Mansfield", inspectionDate: "2026-11-18", thermographers: "Ashton Bott", generatedAt: new Date() };
 type Book = { sheet: string; data: unknown[][] }[];
+/** A typed cell as read-excel-file returns it (dates come back as Date, empty cells as null). */
+const rawValue = (c: { value: unknown } | null) => (c === null ? null : c.value);
 async function readBack(sheets: Parameters<typeof workbookBlob>[0]): Promise<Book> {
   const { default: read } = await import("read-excel-file/universal");
   return (await read(await workbookBlob(sheets))) as Book;
@@ -78,23 +80,28 @@ describe("Infinite Infrared and IRT workbooks", () => {
     expect(map).not.toMatch(/Confidence\|/);
   });
 
-  it("IRT: one Data sheet, 14 columns, no Max Temp, no Confidence, no branding; same rows in the same order", async () => {
+  it("IRT: one Data sheet, 13 columns, no Max Temp, no Visual Image Number, no Confidence, no branding; same rows in the same order", async () => {
     const ds = mansfield();
     const book = await readBack(buildIrtWorkbook(ds));
     expect(book.map((s) => s.sheet)).toEqual(["Data"]);
     const data = book[0].data;
     expect(data[0]).toEqual(IRT_HEADERS);
     expect(data[0]).toEqual(["Image Date", "Location", "Humidity", "Background Temp", "Equipment", "Component", "Distance", "Possible Cause",
-      "IR Image Number", "Visual Image Number", "Emissivity", "Ambient Temp", "Opened", "Review Notes"]);
-    for (const row of data) expect(row).toHaveLength(14);
+      "IR Image Number", "Emissivity", "Ambient Temp", "Opened", "Review Notes"]);
+    for (const row of data) expect(row).toHaveLength(13);
+    expect(data[0]).not.toContain("Visual Image Number");
     const all = data.flat().map((v) => String(v ?? "")).join(" ");
     expect(all).not.toMatch(/InfraReport|Infinite Infrared|118\.4/);
     const inf = buildGeneratorRows(ds);
     expect(data.length - 1).toBe(inf.length);
     expect(data.slice(1).map((r) => `${r[4]}|${r[5]}`)).toEqual(inf.map((r) => `${r[4]}|${r[5]}`));
     const p2 = data.find((r) => r[4] === "Panel P2")!;
-    expect([p2[8], p2[9]]).toEqual(["0110", "0111"]); // leading zeros kept
-    expect(data.find((r) => r[4] === "Disconnect L2")![13]).toBe("RC 6, A Phase, Class 2");
+    expect(p2[8]).toBe("0110"); // leading zeros kept
+    expect(p2).not.toContain("0111"); // its visual number is not in the IRT file
+    expect(data.find((r) => r[4] === "Disconnect L2")![12]).toBe("RC 6, A Phase, Class 2");
+    // Every remaining column carries exactly the Infinite Infrared value of the same name.
+    const infBook = buildWorkbook(ds, meta)[0].data;
+    data.slice(1).forEach((row, r) => IRT_HEADERS.forEach((h, c) => expect(row[c]).toEqual(rawValue(infBook[r + 1][GENERATOR_HEADERS.indexOf(h)]))));
   });
 });
 

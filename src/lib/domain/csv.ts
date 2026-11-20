@@ -43,11 +43,16 @@ export type GeneratorRow = [
   string, string, string, string, string, string, string,
 ];
 
-/** IRT (Infrared Team) layout: the same data without Max Temp. 14 columns. */
-export const IRT_HEADERS: string[] = GENERATOR_HEADERS.filter((h) => h !== "Max Temp");
-export const IRT_COLUMN_COUNT = 14;
-const MAX_TEMP_INDEX = GENERATOR_HEADERS.indexOf("Max Temp");
-export const toIrtRow = (row: GeneratorRow): string[] => row.filter((_, i) => i !== MAX_TEMP_INDEX);
+/**
+ * IRT (Infrared Team) layout: the same data without Max Temp and without Visual
+ * Image Number. 13 columns. (Visual numbers are still recorded and still in the
+ * Infinite Infrared export.)
+ */
+const IRT_EXCLUDED = new Set(["Max Temp", "Visual Image Number"]);
+export const IRT_HEADERS: string[] = GENERATOR_HEADERS.filter((h) => !IRT_EXCLUDED.has(h));
+export const IRT_COLUMN_COUNT = 13;
+const IRT_KEEP = GENERATOR_HEADERS.map((h) => !IRT_EXCLUDED.has(h));
+export const toIrtRow = (row: GeneratorRow): string[] => row.filter((_, i) => IRT_KEEP[i]);
 
 /**
  * Combine notes for one export row. Order: the thermal image's own note, then
