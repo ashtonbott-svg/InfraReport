@@ -301,6 +301,48 @@ const LEGACY = {
   if ((await sql("select count(*)::int n from public.equipment where deleted_at is null"))[0].n !== eqBefore) throw new Error("move duplicated equipment");
   ok("5d. Move to Room: technician moved MCC-1 (IR 201) into a new Switchgear Room; same record, readings kept, no duplicate; synced to the admin phone and the database");
 
+  // Technician deletes a room of uninspected equipment in Field Mode, undoes it, then deletes it for good.
+  await addRoomAndEquipment(J.page, "Temp Room", [["TMP-1", ""], ["TMP-2", ""]]);
+  const tmpIds = async (p) => (await store(p)).equipment.filter((e) => e.name.startsWith("TMP-")).map((e) => e.id);
+  await until("temp items on admin phone", async () => (await tmpIds(A.page)).length === 2);
+  const deleteTempRoom = async () => {
+    await J.page.getByTestId("room-conditions-edit").click();
+    await J.page.getByTestId("field-delete-room").click();
+    await J.page.getByTestId("delete-room-summary").getByText("This room contains 2 uninspected equipment items. Delete the room and all 2 items?").waitFor();
+    await J.page.getByTestId("confirm-delete-room").click();
+  };
+  await deleteTempRoom();
+  await shot(J.page, "05f-room-deleted-undo");
+  await J.page.getByTestId("toast-action").click();
+  await until("undo restored the items on the technician phone", async () => (await tmpIds(J.page)).length === 2);
+  await until("restored items on admin phone", async () => (await tmpIds(A.page)).length === 2);
+  const tmpRoomId = (await store(J.page)).locations.find((l) => l.name === "Temp Room").id;
+  await J.page.goto(BASE + `/inspections/${inspId}/entry?room=${tmpRoomId}`);
+  // An item with a reading in the same room is protected: named, and moved from the dialog.
+  await J.page.getByRole("button", { name: "Add Equipment" }).filter({ visible: true }).first().click();
+  await J.page.locator("#eq-name-input").fill("TMP-3");
+  await J.page.locator("#new-0-ir").fill("301");
+  await J.page.getByRole("button", { name: "Save", exact: true }).click();
+  await J.page.locator("button[data-result-id]").filter({ hasText: "TMP-3" }).first().waitFor();
+  await J.page.getByTestId("room-conditions-edit").click();
+  await J.page.getByTestId("field-delete-room").click();
+  await J.page.getByTestId("delete-room-dialog").getByText(/must be moved to another room before the room is deleted: TMP-3/).waitFor();
+  await J.page.getByTestId("protected-items").getByText("IR 301").waitFor();
+  if (await J.page.getByTestId("confirm-delete-room").isEnabled()) throw new Error("delete offered while TMP-3 has a reading");
+  await shot(J.page, "05g-protected");
+  await J.page.getByTestId("protected-move").click();
+  await J.page.getByRole("radio", { name: /Electrical Room/ }).click();
+  if (await J.page.getByTestId("move-conditions").count()) await J.page.getByTestId("move-keep-conditions").click();
+  await J.page.getByTestId("move-confirm").click();
+  await J.page.getByTestId("delete-room-summary").getByText("This room contains 2 uninspected equipment items. Delete the room and all 2 items?").waitFor();
+  await J.page.getByTestId("confirm-delete-room").click();
+  const tmpLeft = async (p) => (await store(p)).equipment.filter((e) => e.name.startsWith("TMP-")).map((e) => e.name).sort().join(",");
+  await until("temp room gone on admin phone, TMP-3 kept", async () => (await tmpLeft(A.page)) === "TMP-3" && !(await store(A.page)).locations.some((l) => l.name === "Temp Room"));
+  await until("TMP-1/2 soft deleted in database, TMP-3 kept with IR 301", async () => (await sql("select count(*)::int n from public.equipment where name in ('TMP-1','TMP-2') and deleted_at is not null"))[0].n === 2
+    && (await sql("select t.ir_image_number ir, l.name room from public.equipment e join public.results r on r.equipment_id = e.id and r.deleted_at is null join public.thermal_images t on t.result_id = r.id and t.deleted_at is null join public.locations l on l.id = r.location_id where e.name = 'TMP-3' and e.deleted_at is null"))[0]?.ir === "301");
+  if ((await resultByName(J.page, "MCC-1")).images[0].irImageNumber !== "201") throw new Error("other rooms changed");
+  ok("5e. Field Mode: technician deleted Temp Room with its 2 uninspected items in one confirmation; Undo brought them back on both phones; TMP-3 (IR 301) was named, moved from the dialog and kept; then room + 2 items deleted (soft) everywhere");
+
   // ---------------------------------------------------------------- 6. cloud unreachable, refresh, reconnect
   await J.ctx.route(/127\.0\.0\.1:54321/, (r) => r.abort("internetdisconnected"));
   await addRoomAndEquipment(J.page, "Generator Room", [["Panel P2", "102"]]).catch(async () => {
@@ -401,7 +443,7 @@ const LEGACY = {
   await shot(A.page, "08b-format-choice");
   const [dl1] = await Promise.all([A.page.waitForEvent("download"), A.page.getByTestId("card-download-xlsx-infinite").click()]);
   const rows1 = await readWorkbook(dl1);
-  const expected = ["Electrical Room|Panel P1A|105", "Electrical Room|Panel P1A|111", "Generator Room|Panel P2|102", "MCC Room|MCC-2|202", "Switchgear Room|MCC-1|201"];
+  const expected = ["Electrical Room|Panel P1A|105", "Electrical Room|Panel P1A|111", "Electrical Room|TMP-3|301", "Generator Room|Panel P2|102", "MCC Room|MCC-2|202", "Switchgear Room|MCC-1|201"];
   if (JSON.stringify(rows1) !== JSON.stringify(expected)) throw new Error("export before approval: " + JSON.stringify(rows1));
   const o = rows1.ordered;
   if (!(o.indexOf("MCC Room|MCC-2|202") < o.indexOf("Switchgear Room|MCC-1|201")) || !(o.indexOf("Electrical Room|Panel P1A|111") < o.indexOf("Electrical Room|Panel P1A|105"))) throw new Error("export order: " + JSON.stringify(o));
@@ -501,22 +543,15 @@ const LEGACY = {
   const facOver = await A.page.evaluate(() => document.documentElement.scrollWidth - window.innerWidth);
   if (facOver > 1) throw new Error(`facility inventory scrolls sideways by ${facOver}px on a phone`);
   await roomSection("MCC Room").getByTestId("delete-room").click();
-  await A.page.getByTestId("delete-room-dialog").getByText("This room has 1 equipment item. Move it to another room first").waitFor();
-  if (await A.page.getByTestId("confirm-delete-room").count()) throw new Error("delete offered for a room with equipment");
-  await A.page.getByRole("button", { name: "OK", exact: true }).click();
-  await roomSection("MCC Room").getByTestId("inventory-move").click();
-  await A.page.getByRole("radio", { name: /Electrical Room/ }).click();
-  await A.page.getByTestId("move-summary").getByText("approved report keeps MCC Room").waitFor();
-  await A.page.getByTestId("move-confirm").click();
-  await roomSection("Electrical Room").getByText("MCC-2").first().waitFor().catch(async () => { if (!(await roomSection("Electrical Room").locator('input[value="MCC-2"]').count())) throw new Error("MCC-2 not in Electrical Room"); });
-  await roomSection("MCC Room").getByTestId("delete-room").click();
-  await A.page.getByTestId("delete-room-dialog").getByText(/archived instead of deleted/).waitFor();
+  // MCC-2's readings are in the approved report: it is kept (retired) and the room archived.
+  await A.page.getByTestId("delete-room-dialog").getByText(/approved report uses this room, so it is archived: those reports keep the room and its equipment \(retired, not deleted\)/).waitFor();
   await shot(A.page, "10-archive-room");
   await A.page.getByTestId("confirm-delete-room").click();
   await A.page.getByTestId("archived-rooms").getByText("MCC Room").waitFor();
   await until("archived in database", async () => (await sql("select archived_at is not null a, deleted_at is null d from public.locations where name = 'MCC Room'"))[0].a === true);
   if ((await sql("select deleted_at is null d from public.locations where name = 'MCC Room'"))[0].d !== true) throw new Error("archived room was deleted");
-  await until("tech phone has the room archived and MCC-2 moved", async () => { const st = await store(J.page); const l = st.locations.find((x) => x.name === "MCC Room"); const e = st.equipment.find((x) => x.name === "MCC-2"); return l?.archivedAt && st.locations.find((x) => x.id === e?.locationId)?.name === "Electrical Room"; });
+  await until("tech phone has the room archived and MCC-2 retired in it", async () => { const st = await store(J.page); const l = st.locations.find((x) => x.name === "MCC Room"); const e = st.equipment.find((x) => x.name === "MCC-2"); return l?.archivedAt && e && e.active === false && e.locationId === l.id; });
+  if ((await sql("select deleted_at is null kept, active from public.equipment where name = 'MCC-2'"))[0].kept !== true) throw new Error("MCC-2 was deleted");
   if (JSON.stringify(await approvedRows()) !== reportBefore) throw new Error("approved report changed after inventory move/archive");
   // An empty room is deleted outright.
   await A.page.goto(BASE + `/facilities/${facId}`);
@@ -526,11 +561,11 @@ const LEGACY = {
   await until("spare room uploaded", async () => (await sql("select count(*)::int n from public.locations where name = 'Spare Room' and deleted_at is null"))[0].n === 1);
   await until("spare room on tech phone", async () => (await store(J.page)).locations.some((x) => x.name === "Spare Room"));
   await roomSection("Spare Room").getByTestId("delete-room").click();
-  await A.page.getByTestId("delete-room-dialog").getByText(/no equipment and no inspection uses it/).waitFor();
+  await A.page.getByTestId("delete-room-summary").getByText(/It has no uninspected equipment/).waitFor();
   await A.page.getByTestId("confirm-delete-room").click();
   await until("spare room deleted in database", async () => (await sql("select deleted_at is not null g from public.locations where name = 'Spare Room'"))[0]?.g === true);
   await until("spare room gone on tech phone", async () => !(await store(J.page)).locations.some((x) => x.name === "Spare Room"));
-  ok("8c. facility inventory: Delete Room refused for a room with equipment (count shown); MCC-2 moved with Move to Room; MCC Room archived (approved report unchanged); empty room deleted; both phones and database agree");
+  ok("8c. facility inventory: room used by the approved report is archived with MCC-2 retired, not deleted (approved report unchanged); empty room deleted; both phones and database agree");
 
   // ---------------------------------------------------------------- 9. admin disables technician
   await A.page.goto(BASE + "/technicians");

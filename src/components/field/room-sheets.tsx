@@ -1,7 +1,7 @@
 "use client";
 
 import { useState, type FormEvent } from "react";
-import { Check, ChevronRight, Copy, Plus } from "lucide-react";
+import { Check, ChevronRight, Copy, Plus, Trash2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Sheet } from "@/components/ui/sheet";
 import { cn } from "@/lib/cn";
@@ -192,8 +192,10 @@ export function RoomPickerSheet({ open, onClose, rooms, selected, onSelect, onAd
 }
 
 /** Edit the current room's conditions and name. Changes save as you type. */
-export function RoomConditionsSheet({ open, onClose, info, inspectionDate, knownBuildings }: {
+export function RoomConditionsSheet({ open, onClose, info, inspectionDate, knownBuildings, onDeleteRoom }: {
   open: boolean; onClose: () => void; info: RoomInfo | null; inspectionDate: string; knownBuildings: string[];
+  /** Field Mode: delete this room (with its uninspected equipment). Absent when the inspection is locked. */
+  onDeleteRoom?: () => void;
 }) {
   const update = useStore((s) => s.updateRoomConditions);
   const updateLocation = useStore((s) => s.updateLocation);
@@ -225,6 +227,11 @@ export function RoomConditionsSheet({ open, onClose, info, inspectionDate, known
             <datalist id="rc-buildings">{knownBuildings.map((b) => <option key={b} value={b} />)}</datalist>
           </label>
         </div>
+        {onDeleteRoom ? (
+          <Button variant="ghost" className="h-11 w-full justify-center text-red-700" onClick={onDeleteRoom} data-testid="field-delete-room">
+            <Trash2 className="h-4 w-4" />Delete Room
+          </Button>
+        ) : null}
       </div>
     </Sheet>
   );

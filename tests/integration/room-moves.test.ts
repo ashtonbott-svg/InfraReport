@@ -86,20 +86,103 @@ run("Room moves and room deletion (real Supabase, two phones)", () => {
     const spare = ashton.s.createLocation({ facilityId: facId, building: "", name: "Spare", area: "" });
     await ashton.sync(); await justice.sync();
     expect(justice.s.locations.some((l) => l.id === spare)).toBe(true);
-    expect(ashton.s.removeRoom(spare).kind).toBe("delete");
+    expect(ashton.s.removeRoom(spare).plan.kind).toBe("delete");
     await ashton.sync(); await justice.sync();
     expect((await sql("select deleted_at is not null as gone from public.locations where id = $1", [spare]))[0].gone).toBe(true);
     expect(justice.s.locations.some((l) => l.id === spare)).toBe(false);
   });
 
-  it("7. a room with equipment is not deleted, on the phone or in the database", async () => {
-    const plan = ashton.s.removeRoom(roomB);
-    expect(plan).toMatchObject({ kind: "blocked", equipmentCount: 2 });
+  it("imported uninspected equipment: a technician deletes the room and all 6 items in Field Mode; synced; Undo restores the same records on both phones", async () => {
+    ashton.s.importInventory(facId, [1, 2, 3, 4, 5, 6].map((n) => ({ building: "", room: "Wrong Room", name: `MCC-${n}`, type: "MCC", component: "Full MCC" })), "inventory.xlsx");
+    const wrong = ashton.s.locations.find((l) => l.name === "Wrong Room")!.id;
+    for (const e of ashton.s.equipment.filter((x) => x.locationId === wrong)) ashton.s.addExistingEquipment(inspId, e.id);
+    await ashton.sync(); await justice.sync();
+    const eqIds = justice.s.equipment.filter((e) => e.locationId === wrong).map((e) => e.id);
+    expect(eqIds).toHaveLength(6);
+    const { plan, undo } = justice.s.removeRoom(wrong);
+    expect(plan).toMatchObject({ kind: "delete" });
+    await justice.sync(); await ashton.sync();
+    expect(Object.values(justice.engine.data.ops).filter((o) => o.failed)).toEqual([]);
+    const db = async () => (await sql(`select (select count(*)::int from public.equipment where id = any($1) and deleted_at is null) eq,
+      (select count(*)::int from public.equipment where id = any($1)) eq_rows,
+      (select count(*)::int from public.results where equipment_id = any($1) and deleted_at is null) res,
+      (select count(*)::int from public.locations where id = $2 and deleted_at is null) loc`, [eqIds, wrong]))[0];
+    expect(await db()).toEqual({ eq: 0, eq_rows: 6, res: 0, loc: 0 }); // soft deleted: still recoverable
+    for (const p of [ashton, justice]) {
+      expect(p.s.equipment.some((e) => eqIds.includes(e.id))).toBe(false);
+      expect(p.s.locations.some((l) => l.id === wrong)).toBe(false);
+      expect(p.s.results.filter((r) => r.inspectionId === inspId).map((r) => p.s.equipment.find((e) => e.id === r.equipmentId)?.name).sort()).toEqual(["P1", "P2", "P3"]); // the other rooms are untouched
+    }
+    // Stale data cannot bring them back: Ashton refreshes his app and syncs again.
+    ashton.boot(); await ashton.sync();
+    expect(ashton.s.equipment.some((e) => eqIds.includes(e.id))).toBe(false);
+    // Undo after the deletes reached the database: the same records come back.
+    justice.s.undoRoomRemoval(undo!);
+    await justice.sync(); await ashton.sync();
+    expect(Object.values(justice.engine.data.ops).filter((o) => o.failed)).toEqual([]);
+    expect(justice.engine.data.conflicts).toEqual([]);
+    expect(await db()).toEqual({ eq: 6, eq_rows: 6, res: 6, loc: 1 });
+    expect(ashton.s.equipment.filter((e) => eqIds.includes(e.id))).toHaveLength(6);
+    // And delete them for good.
+    expect(ashton.s.removeRoom(wrong).plan.kind).toBe("delete");
+    await ashton.sync(); await justice.sync();
+    expect(await db()).toEqual({ eq: 0, eq_rows: 6, res: 0, loc: 0 });
+    expect(justice.s.equipment.some((e) => eqIds.includes(e.id))).toBe(false);
+  });
+
+  it("offline second technician: a reading taken while the room was deleted elsewhere is kept, and can be kept for good", async () => {
+    const off = ashton.s.createLocation({ facilityId: facId, building: "", name: "Offline Room", area: "" });
+    const o1 = ashton.s.createEquipment({ facilityId: facId, locationId: off, name: "OFF-1", equipmentType: "Panel", defaultComponent: "Full Panel" });
+    ashton.s.createEquipment({ facilityId: facId, locationId: off, name: "OFF-2", equipmentType: "Panel", defaultComponent: "Full Panel" });
+    for (const e of ashton.s.equipment.filter((x) => x.locationId === off)) ashton.s.addExistingEquipment(inspId, e.id);
+    await ashton.sync(); await justice.sync();
+    // Ashton loses signal and records OFF-1.
+    ashton.net.down = true;
+    const r1 = line(ashton, "OFF-1");
+    ashton.s.updateThermalImage(r1.id, r1.images[0].id, { irImageNumber: "0901", notes: "hot neutral" });
+    await ashton.sync();
+    // Justice still sees both items blank and deletes the room.
+    expect(justice.s.removeRoom(off).plan).toMatchObject({ kind: "delete" });
+    await justice.sync();
+    // Ashton reconnects: his reading is not lost; he is asked.
+    ashton.net.down = false;
+    await ashton.sync(); await ashton.sync();
+    expect(line(ashton, "OFF-1").images[0]).toMatchObject({ irImageNumber: "0901", notes: "hot neutral" });
+    expect(ashton.s.equipment.some((e) => e.id === o1)).toBe(true);
+    expect(ashton.s.locations.some((l) => l.id === off)).toBe(true);
+    const asked = ashton.engine.data.conflicts.filter((c) => c.field === "__deleted").map((c) => c.table).sort();
+    expect(asked).toEqual(expect.arrayContaining(["equipment", "locations", "results"]));
+    for (const c of [...ashton.engine.data.conflicts]) ashton.engine.resolveConflict(c.id, "mine");
+    await ashton.sync(); await ashton.sync(); await justice.sync();
+    expect(Object.values(ashton.engine.data.ops).filter((o) => o.failed)).toEqual([]);
+    const row = (await sql(`select r.deleted_at r_del, e.deleted_at e_del, l.deleted_at l_del, t.ir_image_number ir, t.notes from public.results r
+      join public.equipment e on e.id = r.equipment_id join public.locations l on l.id = r.location_id
+      join public.thermal_images t on t.result_id = r.id and t.deleted_at is null where r.id = $1`, [r1.id]))[0];
+    expect(row).toEqual({ r_del: null, e_del: null, l_del: null, ir: "0901", notes: "hot neutral" });
+    expect(line(justice, "OFF-1").images[0].irImageNumber).toBe("0901");
+    expect(justice.s.locations.some((l) => l.id === off)).toBe(true);
+    // OFF-1 is now protected; move it and the room can go (OFF-2 stays deleted).
+    expect(justice.s.removeRoom(off).plan).toMatchObject({ kind: "blocked", protectedItems: [expect.objectContaining({ reasons: ["IR 0901", "notes"] })] });
+    justice.s.moveEquipmentToRoom(o1, roomA, { keepRecordedConditions: true });
+    expect(justice.s.removeRoom(off).plan.kind).toBe("delete");
+    await justice.sync(); await ashton.sync();
+    expect(Object.values(justice.engine.data.ops).filter((o) => o.failed)).toEqual([]);
+    expect(line(ashton, "OFF-1")).toMatchObject({ locationId: roomA });
+  });
+
+  it("7. partially inspected room: only the inspected item is protected; the database refuses unsafe deletes too", async () => {
+    const p3 = line(justice, "P3");
+    justice.s.updateThermalImage(p3.id, p3.images[0].id, { irImageNumber: "0301" });
+    await justice.sync(); await ashton.sync();
+    const { plan } = ashton.s.removeRoom(roomB);
+    expect(plan.kind).toBe("blocked");
+    if (plan.kind !== "blocked") throw new Error();
+    expect(plan.protectedItems.map((p) => p.equipment.name)).toEqual(["P3"]);
     // An older app (or a direct request) is refused by the database as well.
     const { error } = await ashton.sb.from("locations").update({ deleted_at: new Date().toISOString() }).eq("id", roomB);
     expect(error?.message).toMatch(/Room still has 2 equipment item\(s\)/);
-    const { error: e2 } = await ashton.sb.from("locations").update({ archived_at: new Date().toISOString() }).eq("id", roomB);
-    expect(e2?.message).toMatch(/Room still has 2 equipment item\(s\)/);
+    const { error: e2 } = await ashton.sb.from("equipment").update({ deleted_at: new Date().toISOString() }).eq("id", eq(ashton, "P2").id);
+    expect(e2?.message).toMatch(/still has a line in an open inspection/);
     expect((await sql("select deleted_at, archived_at from public.locations where id = $1", [roomB]))[0]).toEqual({ deleted_at: null, archived_at: null });
   });
 
@@ -120,7 +203,7 @@ run("Room moves and room deletion (real Supabase, two phones)", () => {
     // Empty Elec B in the inventory and in the new inspection.
     for (const n of ["P2", "P3"]) expect(justice.s.moveEquipmentToRoom(eq(justice, n).id, roomA)).toEqual({ lines: 1, locked: 1 });
     expect(line(justice, "P3").locationId).toBe(roomB); // approved line untouched
-    expect(justice.s.removeRoom(roomB)).toMatchObject({ kind: "archive", historicalInspectionCount: 1 });
+    expect(justice.s.removeRoom(roomB).plan).toMatchObject({ kind: "archive", historicalInspectionCount: 1 });
     await justice.sync(); await ashton.sync();
     expect(Object.values(justice.engine.data.ops).filter((o) => o.failed)).toEqual([]);
     const db = (await sql("select deleted_at, archived_at from public.locations where id = $1", [roomB]))[0];
@@ -130,9 +213,12 @@ run("Room moves and room deletion (real Supabase, two phones)", () => {
       expect(approved(p)).toEqual(report);
       expect(activeRooms(p.s.locations, facId).map((l) => l.name)).toEqual(["Elec A", "MCC Room"]);
       expect(p.s.rooms.some((r) => r.inspectionId === next && r.locationId === roomB)).toBe(false);
-      expect(names(p, roomA, next)).toEqual(["P2", "P3"]);
+      expect(names(p, roomA, next)).toEqual(["OFF-1", "P2", "P3"]);
     }
     expect((await sql("select count(*)::int n from public.results where inspection_id = $1 and location_id = $2 and deleted_at is null", [inspId, roomB]))[0].n).toBe(2); // P2 and P3 were inspected there
+    // Equipment that the approved report uses cannot be deleted, even by a direct request.
+    const { error: delErr } = await ashton.sb.from("equipment").update({ deleted_at: new Date().toISOString() }).eq("id", eq(ashton, "P3").id);
+    expect(delErr?.message).toMatch(/part of an approved report/);
     // A stale phone cannot put equipment back into the archived room.
     const { error } = await ashton.sb.from("equipment").update({ location_id: roomB }).eq("id", eq(ashton, "P2").id);
     expect(error?.message).toMatch(/deleted or archived/);

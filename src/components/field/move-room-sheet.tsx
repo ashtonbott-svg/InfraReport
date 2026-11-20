@@ -23,13 +23,16 @@ const norm = (v: string) => v.trim().toLowerCase();
  * Shows what moves with it and asks, when readings were already taken, which room
  * conditions belong to them. Nothing changes until "Move" is pressed.
  */
-export function MoveToRoomSheet({ open, onClose, equipmentId, onMoved }: {
+export function MoveToRoomSheet({ open, onClose, equipmentId, onMoved, fromLocationId }: {
   open: boolean; onClose: () => void; equipmentId: string; onMoved?: (toLocationId: string) => void;
+  /** The room being emptied, when it is not the equipment's inventory room (a line left behind there). */
+  fromLocationId?: string;
 }) {
   const s = useStore();
   const equipment = s.equipment.find((e) => e.id === equipmentId);
-  const current = s.locations.find((l) => l.id === equipment?.locationId);
-  const rooms = useMemo(() => (equipment ? activeRooms(s.locations, equipment.facilityId).filter((l) => l.id !== equipment.locationId) : []), [s.locations, equipment]);
+  const fromId = fromLocationId ?? equipment?.locationId;
+  const current = s.locations.find((l) => l.id === fromId);
+  const rooms = useMemo(() => (equipment ? activeRooms(s.locations, equipment.facilityId).filter((l) => l.id !== fromId) : []), [s.locations, equipment, fromId]);
   const [dest, setDest] = useState("");
   const [room, setRoom] = useState({ name: "", building: "" });
   const [keep, setKeep] = useState<boolean | null>(null);
@@ -105,7 +108,7 @@ export function MoveToRoomSheet({ open, onClose, equipmentId, onMoved }: {
             </label>
             {duplicate ? (
               <p className="text-sm text-amber-900 sm:col-span-2">
-                {duplicate.id === equipment.locationId ? `${locationLabel(duplicate)} is the current room.` : <>{locationLabel(duplicate)} already exists. <button type="button" className="font-semibold underline" onClick={() => setDest(duplicate.id)}>Choose it</button> instead of creating a second room with the same name.</>}
+                {duplicate.id === fromId ? `${locationLabel(duplicate)} is the current room.` : <>{locationLabel(duplicate)} already exists. <button type="button" className="font-semibold underline" onClick={() => setDest(duplicate.id)}>Choose it</button> instead of creating a second room with the same name.</>}
               </p>
             ) : null}
           </div>

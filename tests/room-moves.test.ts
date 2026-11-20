@@ -2,9 +2,9 @@ import { describe, expect, it } from "vitest";
 import { createStore } from "zustand/vanilla";
 import { isInspectionLocked, roomOrder, storeInitializer, type Store } from "@/lib/store/store";
 import { buildGeneratorRows, withApprovalSnapshot, type ExportDataset } from "@/lib/domain/csv";
-import { activeRooms, planEquipmentMove, planRoomRemoval } from "@/lib/domain/room-moves";
+import { activeRooms, planEquipmentMove, planRoomRemoval, removalSummary } from "@/lib/domain/room-moves";
 import { extractRecords } from "@/lib/sync/mapping";
-import { orderedOps, recordChanges, emptySyncData } from "@/lib/sync/outbox";
+import { orderedOps, recordChanges, emptySyncData, rememberDeleted, settleOp } from "@/lib/sync/outbox";
 
 /** A facility with two rooms (Elec A with P1, P2; Elec B with P3) and one open inspection carried forward. */
 function site(org = "org-cloud") {
@@ -147,63 +147,139 @@ describe("move equipment between rooms", () => {
 });
 
 describe("delete rooms", () => {
-  it("6. an empty, unused room is deleted together with its blank inspection conditions", () => {
+  const ids = (x: ReturnType<typeof site>) => ({ eq: x.s().equipment.map((e) => e.id).sort(), res: x.s().results.map((r) => r.id).sort() });
+
+  it("empty room: deleted after confirmation, blank inspection conditions go with it", () => {
     const x = site();
     const c = x.s().createLocation({ facilityId: x.fac, building: "", name: "Spare", area: "" });
     x.s().addRoomToInspection(x.insp, c);
-    expect(x.s().removeRoom(c).kind).toBe("delete");
+    const plan = planRoomRemoval({ ...x.s(), isLocked: isInspectionLocked }, c);
+    expect(plan).toMatchObject({ kind: "delete", deleteEquipment: [] });
+    expect(x.s().removeRoom(c).plan.kind).toBe("delete");
     expect(x.s().locations.some((l) => l.id === c)).toBe(false);
     expect(x.s().rooms.some((r) => r.locationId === c)).toBe(false);
   });
 
-  it("7. a room with equipment is not deleted; the count is shown and nothing changes", () => {
+  it("imported, uninspected equipment: the room and all of it go with one confirmation; other rooms untouched; Undo puts everything back", () => {
     const x = site();
+    const imp = x.s().createLocation({ facilityId: x.fac, building: "", name: "Wrong Room", area: "" });
+    x.s().importInventory(x.fac, [1, 2, 3, 4, 5, 6].map((n) => ({ building: "", room: "Wrong Room", name: `MCC-${n}`, type: "MCC", component: "Full MCC" })), "list.xlsx");
+    const insp2 = x.s().createInspection({ customerId: x.cust, facilityId: x.fac, date: "2026-11-21", inspectorIds: ["u1"], carryForward: true });
+    expect(x.s().equipment.filter((e) => e.locationId === imp)).toHaveLength(6);
+    // A view placeholder alone (component only) is not inspection work.
+    const one = x.s().results.find((r) => r.inspectionId === insp2 && x.s().equipment.find((e) => e.id === r.equipmentId)?.name === "MCC-1")!;
+    x.s().addThermalImage(one.id, { component: "Bottom Half" });
+    const before = ids(x);
+    const snapshot = JSON.stringify({ l: x.s().locations, e: x.s().equipment, r: x.s().results, rc: x.s().rooms });
+    const plan = planRoomRemoval({ ...x.s(), isLocked: isInspectionLocked }, imp);
+    expect(plan.kind).toBe("delete");
+    if (plan.kind === "blocked") throw new Error();
+    expect(removalSummary(plan)).toBe("This room contains 6 uninspected equipment items. Delete the room and all 6 items?");
+    const { undo } = x.s().removeRoom(imp);
+    expect(x.s().equipment.filter((e) => e.name.startsWith("MCC-"))).toHaveLength(0);
+    expect(x.s().results.filter((r) => r.inspectionId === insp2)).toHaveLength(3); // P1, P2, P3 lines stay
+    expect(x.s().locations.some((l) => l.id === imp)).toBe(false);
+    expect(x.s().reviewEvents.some((e) => e.inspectionId === insp2 && e.detail === "Wrong Room: 6 uninspected equipment items removed")).toBe(true);
+    x.s().undoRoomRemoval(undo!);
+    expect(ids(x)).toEqual(before);
+    expect(JSON.stringify({ l: x.s().locations, e: x.s().equipment, r: x.s().results, rc: x.s().rooms })).toBe(snapshot);
+  });
+
+  it("partially inspected room: protected items are named with what they hold; nothing changes until they are moved", () => {
+    const x = site();
+    const r1 = x.res(x.p1);
+    x.s().updateThermalImage(r1.id, r1.images[0].id, { irImageNumber: "0101" });
     const before = JSON.stringify(x.s());
-    const plan = x.s().removeRoom(x.a);
+    const { plan } = x.s().removeRoom(x.a);
     expect(plan.kind).toBe("blocked");
-    expect(plan.kind === "blocked" && plan.equipmentCount).toBe(2);
-    expect(plan.kind === "blocked" && plan.reason).toMatch(/2 equipment items\. Move them to another room first/);
+    if (plan.kind !== "blocked") throw new Error();
+    expect(plan.protectedItems.map((p) => [p.equipment.name, p.reasons])).toEqual([["P1", ["IR 0101"]]]);
+    expect(plan.reason).toBe("This item has inspection work and must be moved to another room before the room is deleted: P1.");
     expect(JSON.stringify(x.s())).toBe(before);
-    // Retired equipment counts too: it is never deleted with a room.
-    x.s().moveEquipmentToRoom(x.p3, x.a);
-    x.s().updateEquipment(x.p1, { active: false });
-    x.s().moveEquipmentToRoom(x.p2, x.b);
-    x.s().moveEquipmentToRoom(x.p3, x.b);
-    expect(planRoomRemoval({ ...x.s(), isLocked: isInspectionLocked }, x.a)).toMatchObject({ kind: "blocked", equipmentCount: 1 });
+    // Move the inspected item; the rest (uninspected P2) goes with the room.
+    x.s().moveEquipmentToRoom(x.p1, x.b, { keepRecordedConditions: true });
+    const { plan: done } = x.s().removeRoom(x.a);
+    expect(done).toMatchObject({ kind: "delete", deleteEquipment: [expect.objectContaining({ name: "P2" })] });
+    expect(x.res(x.p1).images[0].irImageNumber).toBe("0101");
+    expect(x.s().equipment.some((e) => e.id === x.p2)).toBe(false);
   });
 
-  it("a room still used by an open inspection, or with measured conditions there, is not deleted", () => {
+  it("every kind of saved work protects an item, whatever its Done / To Do label says", () => {
+    const cases: [string, (x: ReturnType<typeof site>, id: string, imgId: string) => void, string][] = [
+      ["IR number", (x, id, img) => x.s().updateThermalImage(id, img, { irImageNumber: "7" }), "IR 7"],
+      ["visual number only", (x, id, img) => x.s().updateThermalImage(id, img, { visualOverridden: true, visualImageNumber: "8" }), "Visual 8"],
+      ["distance", (x, id, img) => x.s().updateThermalImage(id, img, { distance: "4" }), "measurements"],
+      ["max temp", (x, id, img) => x.s().updateThermalImage(id, img, { maxTemp: "120" }), "measurements"],
+      ["finding", (x, id, img) => x.s().updateThermalImage(id, img, { possibleCause: "Loose Connection(s)" }), "finding"],
+      ["image note", (x, id, img) => x.s().updateThermalImage(id, img, { notes: "hot" }), "notes"],
+      ["equipment note", (x, id) => x.s().updateResult(id, { reviewNotes: "cover missing" }), "notes"],
+      ["photo note", (x, id) => x.s().updateResult(id, { photoNotes: [{ photoId: "p", kind: "equipment", note: "n", at: "" }] }), "notes"],
+      ["not scanned", (x, id) => x.s().setException(id, { kind: "not-scanned", note: "" }), "not scanned"],
+      ["deferred", (x, id) => x.s().setException(id, { kind: "deferred", note: "" }), "deferred"],
+      ["Opened reason", (x, id) => x.s().updateResult(id, { opened: "Item is Locked Out" }), "Opened: Item is Locked Out"],
+      ["Opened dead front", (x, id) => x.s().updateResult(id, { opened: "Yes, with Dead-Front on" }), "Opened: Yes, with Dead-Front on"],
+      ["row override", (x, id) => x.s().setOverride(id, "humidity", "33"), "measurements"],
+      ["saved photo", (x, id) => x.st.setState((st) => ({ photos: [...st.photos, { id: "ph", resultId: id } as never] })), "photo"],
+    ];
+    for (const [label, apply, reason] of cases) {
+      const x = site();
+      const r = x.res(x.p3);
+      apply(x, r.id, r.images[0].id);
+      const plan = planRoomRemoval({ ...x.s(), isLocked: isInspectionLocked }, x.b);
+      expect(plan.kind, label).toBe("blocked");
+      if (plan.kind === "blocked") expect(plan.protectedItems[0].reasons, label).toContain(reason);
+    }
+  });
+
+  it("completed (Done) equipment is protected; work in another open inspection protects it too", () => {
     const x = site();
-    // Equipment line still in the room although the inventory item moved elsewhere earlier.
-    x.st.setState((st) => ({ equipment: st.equipment.map((e) => (e.locationId === x.b ? { ...e, locationId: x.a } : e)) }));
-    expect(x.s().removeRoom(x.b)).toMatchObject({ kind: "blocked", openInspectionCount: 1 });
-    x.s().moveEquipmentToRoom(x.p3, x.b);
-    x.s().moveEquipmentToRoom(x.p3, x.a);
-    // No lines left, but humidity was measured there in the open inspection.
-    expect(x.s().removeRoom(x.b)).toMatchObject({ kind: "blocked" });
-    expect(x.s().locations.some((l) => l.id === x.b)).toBe(true);
+    const r = x.res(x.p3);
+    x.s().updateThermalImage(r.id, r.images[0].id, { irImageNumber: "0301", distance: "5" });
+    expect(planRoomRemoval({ ...x.s(), isLocked: isInspectionLocked }, x.b).kind).toBe("blocked");
+    // A second open inspection where P3 is still blank: the work in the first one still protects it.
+    const insp2 = x.s().createInspection({ customerId: x.cust, facilityId: x.fac, date: "2026-11-21", inspectorIds: ["u1"], carryForward: true });
+    expect(x.res(x.p3, insp2).images[0].irImageNumber).toBe("");
+    expect(planRoomRemoval({ ...x.s(), isLocked: isInspectionLocked }, x.b).kind).toBe("blocked");
   });
 
-  it("8. a room used only by approved reports is archived: reports unchanged, gone from new inspections and pickers", () => {
+  it("approved history: equipment that approved reports use is retired, never deleted; the room is archived; the report is unchanged", () => {
     const x = site();
     approve(x, x.insp);
     const report = JSON.stringify(buildGeneratorRows(dataset(x.st, x.insp)));
     const open = x.s().createInspection({ customerId: x.cust, facilityId: x.fac, date: "2026-11-21", inspectorIds: ["u1"], carryForward: true });
-    x.s().moveEquipmentToRoom(x.p3, x.a);
-    const plan = x.s().removeRoom(x.b);
+    const fresh = x.s().createEquipment({ facilityId: x.fac, locationId: x.b, name: "New Panel", equipmentType: "Panel", defaultComponent: "Full Panel" });
+    const { plan, undo } = x.s().removeRoom(x.b);
     expect(plan).toMatchObject({ kind: "archive", historicalInspectionCount: 1 });
-    expect(x.s().locations.find((l) => l.id === x.b)!.archivedAt).toBeTruthy();
-    expect(x.s().rooms.some((r) => r.inspectionId === open && r.locationId === x.b)).toBe(false); // blank, open: removed
-    expect(x.rc(x.b)).toBeTruthy(); // approved: kept
+    if (plan.kind === "blocked") throw new Error();
+    expect(plan.retireEquipment.map((e) => e.name)).toEqual(["P3"]);
+    expect(plan.deleteEquipment.map((e) => e.name)).toEqual(["New Panel"]);
+    expect(x.s().equipment.find((e) => e.id === x.p3)).toMatchObject({ active: false, locationId: x.b });
+    expect(x.s().equipment.some((e) => e.id === fresh)).toBe(false);
+    expect(x.s().results.some((r) => r.inspectionId === open && r.equipmentId === x.p3)).toBe(false); // blank line in the open inspection
+    expect(x.res(x.p3).locationId).toBe(x.b); // approved line untouched
+    expect(x.rc(x.b)).toBeTruthy();
     expect(JSON.stringify(buildGeneratorRows(dataset(x.st, x.insp)))).toBe(report);
     expect(activeRooms(x.s().locations, x.fac).map((l) => l.name)).toEqual(["Elec A"]);
     const next = x.s().createInspection({ customerId: x.cust, facilityId: x.fac, date: "2026-11-22", inspectorIds: ["u1"], carryForward: true });
-    expect(x.s().rooms.filter((r) => r.inspectionId === next).map((r) => r.locationId)).toEqual([x.a]);
-    x.s().restoreRoom(x.b);
-    expect(activeRooms(x.s().locations, x.fac).map((l) => l.name)).toEqual(["Elec A", "Elec B"]);
+    expect(x.s().results.filter((r) => r.inspectionId === next).map((r) => x.s().equipment.find((e) => e.id === r.equipmentId)!.name)).toEqual(["P1", "P2"]);
+    x.s().undoRoomRemoval(undo!);
+    expect(x.s().equipment.find((e) => e.id === x.p3)).toMatchObject({ active: true });
+    expect(x.s().locations.find((l) => l.id === x.b)!.archivedAt).toBeNull();
+    expect(x.s().equipment.some((e) => e.id === fresh)).toBe(true);
   });
 
-  it("9. moving and deleting never loses measurements, notes or entries", () => {
+  it("measured room conditions in the open inspection are removed with an uninspected room (and come back with Undo)", () => {
+    const x = site();
+    const { plan, undo } = x.s().removeRoom(x.b);
+    expect(plan.kind).toBe("delete");
+    if (plan.kind === "blocked") throw new Error();
+    expect(plan.measuredConditions.map((c) => c.humidity)).toEqual(["55"]);
+    expect(x.s().rooms.some((r) => r.locationId === x.b)).toBe(false);
+    x.s().undoRoomRemoval(undo!);
+    expect(x.rc(x.b).humidity).toBe("55");
+  });
+
+  it("moving and deleting never loses measurements, notes or entries", () => {
     const x = site();
     for (const eq of [x.p1, x.p2, x.p3]) {
       const r = x.res(eq);
@@ -212,44 +288,58 @@ describe("delete rooms", () => {
     }
     const all = () => x.s().results.map((r) => `${r.id}|${r.images.map((i) => `${i.irImageNumber}/${i.notes}`).join(",")}|${r.reviewNotes}`).sort();
     const before = all();
+    expect(x.s().removeRoom(x.a).plan.kind).toBe("blocked");
     const c = x.s().createLocation({ facilityId: x.fac, building: "", name: "New", area: "" });
     x.s().moveEquipmentToRoom(x.p1, c, { keepRecordedConditions: true });
     x.s().moveEquipmentToRoom(x.p2, c, { keepRecordedConditions: true });
-    x.s().removeRoomFromInspection(x.insp, x.a);
-    expect(x.s().removeRoom(x.a).kind).toBe("delete");
+    expect(x.s().removeRoom(x.a).plan.kind).toBe("delete");
     expect(all()).toEqual(before);
-    expect(x.s().reviewEvents.filter((e) => e.action === "Equipment moved")).toHaveLength(2);
   });
 });
 
 describe("sync of room changes", () => {
-  it("a move is one update per record (no new records); archiving uploads after the moves that emptied the room", () => {
+  it("deleting a room uploads line, condition and equipment deletes before the room delete", () => {
     const x = site();
     const prev = extractRecords(x.s(), "org-cloud");
-    x.s().moveEquipmentToRoom(x.p3, x.a);
     x.s().removeRoom(x.b);
-    const next = extractRecords(x.s(), "org-cloud");
-    const data = recordChanges(emptySyncData("u1", "org-cloud"), prev, next, 0);
-    const ops = orderedOps(data).map((o) => `${o.kind}:${o.table}`);
-    // Elec B still has measured conditions in the open inspection, so deleting it is refused: nothing is deleted
-    expect(ops.filter((o) => o.startsWith("delete"))).toEqual([]);
-    expect(ops).toContain("upsert:equipment");
-    expect(ops).toContain("upsert:results");
-    expect(ops).not.toContain("upsert:locations");
+    const data = recordChanges(emptySyncData("u1", "org-cloud"), prev, extractRecords(x.s(), "org-cloud"), 0);
+    const ops = orderedOps(data).map((o) => `${o.kind}:${o.table}`).filter((o) => o.startsWith("delete"));
+    expect(ops).toEqual(["delete:thermal_images", "delete:results", "delete:room_conditions", "delete:equipment", "delete:locations"]);
   });
 
-  it("archive is ordered after equipment and result updates", () => {
+  it("archive is ordered after the retire and the deletes that emptied the room", () => {
     const x = site();
     approve(x, x.insp);
     x.s().createInspection({ customerId: x.cust, facilityId: x.fac, date: "2026-11-21", inspectorIds: ["u1"], carryForward: true });
     const prev = extractRecords(x.s(), "org-cloud");
-    x.s().moveEquipmentToRoom(x.p3, x.a);
-    expect(x.s().removeRoom(x.b).kind).toBe("archive");
+    expect(x.s().removeRoom(x.b).plan.kind).toBe("archive");
     const data = recordChanges(emptySyncData("u1", "org-cloud"), prev, extractRecords(x.s(), "org-cloud"), 0);
     const ops = orderedOps(data).map((o) => `${o.kind}:${o.table}`);
-    expect(ops.indexOf("upsert:locations")).toBeGreaterThan(ops.lastIndexOf("upsert:results"));
     expect(ops.indexOf("upsert:locations")).toBeGreaterThan(ops.indexOf("upsert:equipment"));
+    expect(ops.indexOf("upsert:locations")).toBeGreaterThan(ops.indexOf("delete:results"));
     expect(data.ops[`locations:${x.b}`].changed).toEqual(["archived_at"]);
+  });
+
+  it("Undo after the deletes reached the server restores the same records instead of re-creating them", () => {
+    const x = site();
+    let data = emptySyncData("u1", "org-cloud");
+    const prev = extractRecords(x.s(), "org-cloud");
+    for (const k of prev.keys()) data.versions[k] = 1;
+    const { undo } = x.s().removeRoom(x.b);
+    const mid = extractRecords(x.s(), "org-cloud");
+    data = recordChanges(data, prev, mid, 0);
+    // The server accepted every delete.
+    for (const op of Object.values(data.ops)) if (op.kind === "delete") data = rememberDeleted(settleOp(data, op.key, {}, null, 2), op.key);
+    expect(Object.keys(data.ops).filter((k) => !k.startsWith("review_events"))).toEqual([]);
+    x.s().undoRoomRemoval(undo!);
+    data = recordChanges(data, mid, extractRecords(x.s(), "org-cloud"), 0);
+    const restored = Object.values(data.ops).filter((o) => o.table !== "review_events" && o.table !== "inspections");
+    expect(restored.length).toBeGreaterThan(0);
+    for (const op of restored) {
+      expect(op.kind).toBe("upsert");
+      expect(op.row.__restore).toBe(true);
+      expect(op.baseVersion).toBe(2);
+    }
   });
 
   it("existing rooms produce no upload when the new archived field is introduced", () => {

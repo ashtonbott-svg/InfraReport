@@ -55,6 +55,17 @@ import { trackedLocalStorage } from "./save-status";
 import { locationLabel } from "../domain/csv";
 import { planEquipmentMove, planRoomRemoval, type RoomRemoval } from "../domain/room-moves";
 
+/** What one room removal took away, so it can be put back. */
+export interface RoomUndo {
+  location: Location;
+  /** true: the room was deleted; false: it was archived. */
+  removedLocation: boolean;
+  /** Deleted equipment and retired equipment (as they were before). */
+  equipment: Equipment[];
+  results: InspectionResult[];
+  rooms: InspectionRoomConditions[];
+}
+
 export const SCHEMA_VERSION = 4;
 
 /** Called when someone tries to change a locked (approved) shared inspection. The app shows a message. */
@@ -137,8 +148,13 @@ export interface Actions {
    * item overrides instead of taking the new room's conditions.
    */
   moveEquipmentToRoom(equipmentId: ID, toLocationId: ID, opts?: { keepRecordedConditions?: boolean }): { lines: number; locked: number } | null;
-  /** Delete an unused room, or archive one that only approved reports use. Never removes equipment or inspection data. */
-  removeRoom(locationId: ID): RoomRemoval;
+  /**
+   * Delete a room together with its uninspected equipment (recoverable soft delete), or archive it
+   * when approved reports use it. Refused while any equipment there has inspection work.
+   */
+  removeRoom(locationId: ID): { plan: RoomRemoval; undo: RoomUndo | null };
+  /** Put back everything one removeRoom took away (records keep their ids). */
+  undoRoomRemoval(undo: RoomUndo): void;
   /** Bring an archived room back into the active inventory. */
   restoreRoom(locationId: ID): void;
   createEquipment(input: Omit<Equipment, "id" | "organizationId" | "createdAt" | "sortOrder" | "active">): ID;
@@ -354,15 +370,55 @@ export const storeInitializer: StateCreator<Store> = (set, get) => {
         removeRoom(locationId) {
           const s = get();
           const plan = planRoomRemoval({ ...s, isLocked: isInspectionLocked }, locationId);
-          if (plan.kind === "blocked") return plan;
-          const blank = new Set(plan.blankConditionIds);
+          const location = s.locations.find((l) => l.id === locationId);
+          if (plan.kind === "blocked" || !location) return { plan, undo: null };
+          const delEq = new Set(plan.deleteEquipment.map((e) => e.id));
+          const retire = new Set(plan.retireEquipment.map((e) => e.id));
+          const delRes = new Set(plan.deleteResultIds);
+          const delRc = new Set(plan.conditionIds);
+          const undo: RoomUndo = {
+            location,
+            removedLocation: plan.kind === "delete",
+            equipment: s.equipment.filter((e) => delEq.has(e.id) || retire.has(e.id)),
+            results: s.results.filter((r) => delRes.has(r.id)),
+            rooms: s.rooms.filter((r) => delRc.has(r.id)),
+          };
           set((st) => ({
-            rooms: st.rooms.filter((r) => !blank.has(r.id)),
+            results: st.results.filter((r) => !delRes.has(r.id)),
+            rooms: st.rooms.filter((r) => !delRc.has(r.id)),
+            equipment: st.equipment.filter((e) => !delEq.has(e.id)).map((e) => (retire.has(e.id) ? { ...e, active: false } : e)),
             locations: plan.kind === "delete"
               ? st.locations.filter((l) => l.id !== locationId)
               : st.locations.map((l) => (l.id === locationId ? { ...l, archivedAt: now() } : l)),
           }));
-          return plan;
+          const label = locationLabel(location);
+          for (const inspId of new Set([...undo.results.map((r) => r.inspectionId), ...undo.rooms.map((r) => r.inspectionId)])) {
+            const n = undo.results.filter((r) => r.inspectionId === inspId).length;
+            get().logEvent(inspId, "Room deleted", `${label}${n ? `: ${n} uninspected equipment item${n === 1 ? "" : "s"} removed` : ""}`);
+            touch(inspId);
+          }
+          return { plan, undo };
+        },
+        undoRoomRemoval(undo) {
+          set((st) => {
+            const has = <T extends { id: string }>(list: T[], id: string) => list.some((x) => x.id === id);
+            const eqBefore = new Map(undo.equipment.map((e) => [e.id, e]));
+            return {
+              locations: undo.removedLocation
+                ? (has(st.locations, undo.location.id) ? st.locations : [...st.locations, undo.location])
+                : st.locations.map((l) => (l.id === undo.location.id ? { ...l, archivedAt: undo.location.archivedAt ?? null } : l)),
+              equipment: [
+                ...st.equipment.map((e) => (eqBefore.has(e.id) ? { ...e, active: eqBefore.get(e.id)!.active } : e)),
+                ...undo.equipment.filter((e) => !has(st.equipment, e.id)),
+              ],
+              results: [...st.results, ...undo.results.filter((r) => !has(st.results, r.id))],
+              rooms: [...st.rooms, ...undo.rooms.filter((r) => !has(st.rooms, r.id) && !st.rooms.some((x) => x.inspectionId === r.inspectionId && x.locationId === r.locationId))],
+            };
+          });
+          for (const inspId of new Set([...undo.results.map((r) => r.inspectionId), ...undo.rooms.map((r) => r.inspectionId)])) {
+            get().logEvent(inspId, "Room deletion undone", locationLabel(undo.location));
+            touch(inspId);
+          }
         },
         restoreRoom(locationId) {
           set((s) => ({ locations: s.locations.map((l) => (l.id === locationId ? { ...l, archivedAt: null } : l)) }));

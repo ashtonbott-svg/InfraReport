@@ -1,4 +1,4 @@
-import { POSSIBLE_CAUSE_NONE } from "@/lib/domain/constants";
+import { DEFAULT_OPENED, POSSIBLE_CAUSE_NONE } from "@/lib/domain/constants";
 import type { Equipment, Inspection, InspectionResult, InspectionRoomConditions, Location } from "@/lib/domain/types";
 
 /** The part of the device store these plans read. */
@@ -80,45 +80,112 @@ export function planEquipmentMove(s: RoomData, equipmentId: string, toLocationId
   return { equipment, from, to, lines, lockedCount };
 }
 
+/** A photo saved on this device for an equipment line (photos stay on the phone). */
+export interface PhotoRef { resultId?: string | null }
+
+/**
+ * The saved inspection work on one equipment line, as short reasons. Empty means the line
+ * holds nothing an inspector recorded (a carried-forward or imported line still To Do).
+ * Never decided by the Done / To Do label: every saved field is checked.
+ */
+export function inspectionWork(r: InspectionResult, photos: PhotoRef[] = []): string[] {
+  const out = new Set<string>();
+  for (const i of r.images) {
+    if (i.irImageNumber) out.add(`IR ${i.irImageNumber}`);
+    else if (i.visualImageNumber) out.add(`Visual ${i.visualImageNumber}`);
+    if (i.distance || i.maxTemp) out.add("measurements");
+    if (i.possibleCause && i.possibleCause !== POSSIBLE_CAUSE_NONE) out.add("finding");
+    if (i.notes.trim()) out.add("notes");
+  }
+  if (r.reviewNotes.trim() || (r.photoNotes?.length ?? 0) > 0 || (r.confidence ?? "").trim()) out.add("notes");
+  if (r.exception) out.add(r.exception.kind === "deferred" ? "deferred" : "not scanned");
+  if (r.opened && r.opened !== DEFAULT_OPENED) out.add(`Opened: ${r.opened}`);
+  if (Object.values(r.overrides ?? {}).some((v) => v !== null && v !== undefined)) out.add("measurements");
+  if (photos.some((p) => p.resultId === r.id)) out.add("photo");
+  return [...out];
+}
+
+export interface ProtectedItem { equipment: Equipment; reasons: string[] }
+
 export type RoomRemoval =
-  | { kind: "blocked"; reason: string; equipmentCount: number; openInspectionCount: number }
-  | { kind: "delete"; blankConditionIds: string[] }
-  | { kind: "archive"; blankConditionIds: string[]; historicalInspectionCount: number };
+  | { kind: "blocked"; reason: string; protectedItems: ProtectedItem[] }
+  | {
+    kind: "delete" | "archive";
+    /** Uninspected equipment removed from the inventory (recoverable soft delete). */
+    deleteEquipment: Equipment[];
+    /** Equipment that approved reports use: kept for history, retired, stays in the archived room. */
+    retireEquipment: Equipment[];
+    /** Blank lines removed from open inspections. */
+    deleteResultIds: string[];
+    /** This room's conditions in open inspections (removed with the room). */
+    conditionIds: string[];
+    /** Of those, the ones with values recorded. */
+    measuredConditions: InspectionRoomConditions[];
+    historicalInspectionCount: number;
+  };
 
 const blankConditions = (c: InspectionRoomConditions) => !c.humidity && !c.ambientTemp && !c.backgroundTemp && !c.imageDate;
 
 /**
- * Whether a room can be removed, and how.
- * Equipment is never deleted with a room, and open inspections must not lose a room they use.
- * A room that only approved inspections use is archived so their reports stay intact.
+ * Whether a room can be removed, and what goes with it.
+ * - Equipment with inspection work in any open inspection is protected: it must be moved first.
+ * - Uninspected equipment (imported or carried forward, nothing recorded) is deleted with the room.
+ * - Equipment that approved reports use is never deleted: it is retired and the room is archived,
+ *   so those reports keep their original room and equipment.
  */
-export function planRoomRemoval(s: RoomData, locationId: string): RoomRemoval {
-  const equipmentCount = s.equipment.filter((e) => e.locationId === locationId).length;
-  const openIds = new Set<string>();
-  const lockedIds = new Set<string>();
-  const blankConditionIds: string[] = [];
-  let measuredOpen = false;
+export function planRoomRemoval(s: RoomData & { photos?: PhotoRef[] }, locationId: string): RoomRemoval {
+  const photos = s.photos ?? [];
   const locked = (inspectionId: string) => s.isLocked(s.inspections.find((i) => i.id === inspectionId));
-  for (const r of s.results) {
-    if (r.locationId !== locationId) continue;
-    (locked(r.inspectionId) ? lockedIds : openIds).add(r.inspectionId);
+  const resultsOf = (equipmentId: string) => s.results.filter((r) => r.equipmentId === equipmentId);
+  const protectedItems: ProtectedItem[] = [];
+  const deleteEquipment: Equipment[] = [];
+  const retireEquipment: Equipment[] = [];
+  const deleteResultIds = new Set<string>();
+  const lockedIds = new Set<string>();
+  const addProtected = (equipment: Equipment, reasons: string[]) => {
+    const cur = protectedItems.find((p) => p.equipment.id === equipment.id);
+    if (cur) cur.reasons = [...new Set([...cur.reasons, ...reasons])];
+    else protectedItems.push({ equipment, reasons });
+  };
+
+  for (const e of s.equipment.filter((x) => x.locationId === locationId)) {
+    const lines = resultsOf(e.id);
+    const open = lines.filter((r) => !locked(r.inspectionId));
+    const work = open.flatMap((r) => inspectionWork(r, photos));
+    if (work.length) { addProtected(e, work); continue; }
+    const history = lines.filter((r) => locked(r.inspectionId));
+    for (const r of history) lockedIds.add(r.inspectionId);
+    for (const r of open) deleteResultIds.add(r.id);
+    (history.length ? retireEquipment : deleteEquipment).push(e);
   }
-  for (const c of s.rooms) {
-    if (c.locationId !== locationId) continue;
-    if (locked(c.inspectionId)) lockedIds.add(c.inspectionId);
-    else if (blankConditions(c)) blankConditionIds.push(c.id);
-    else { measuredOpen = true; openIds.add(c.inspectionId); }
+  // Lines in this room whose equipment now belongs to another room.
+  for (const r of s.results.filter((x) => x.locationId === locationId && !deleteResultIds.has(x.id))) {
+    const e = s.equipment.find((x) => x.id === r.equipmentId);
+    if (!e || e.locationId === locationId) continue;
+    if (locked(r.inspectionId)) { lockedIds.add(r.inspectionId); continue; }
+    const work = inspectionWork(r, photos);
+    if (work.length) addProtected(e, work);
+    else deleteResultIds.add(r.id);
   }
-  if (equipmentCount > 0) {
-    return { kind: "blocked", equipmentCount, openInspectionCount: openIds.size,
-      reason: `This room has ${equipmentCount} equipment item${equipmentCount === 1 ? "" : "s"}. Move ${equipmentCount === 1 ? "it" : "them"} to another room first. Equipment is never deleted with a room.` };
+  if (protectedItems.length) {
+    const names = protectedItems.map((p) => p.equipment.name).join(", ");
+    return { kind: "blocked", protectedItems,
+      reason: `${protectedItems.length === 1 ? "This item has" : "These items have"} inspection work and must be moved to another room before the room is deleted: ${names}.` };
   }
-  if (openIds.size > 0) {
-    return { kind: "blocked", equipmentCount, openInspectionCount: openIds.size,
-      reason: measuredOpen
-        ? `This room has conditions recorded in ${openIds.size} open inspection${openIds.size === 1 ? "" : "s"}. Remove the room from ${openIds.size === 1 ? "that inspection" : "those inspections"} first.`
-        : `This room is still used by ${openIds.size} open inspection${openIds.size === 1 ? "" : "s"}. Move ${openIds.size === 1 ? "its" : "their"} equipment to another room first.` };
-  }
-  if (lockedIds.size > 0) return { kind: "archive", blankConditionIds, historicalInspectionCount: lockedIds.size };
-  return { kind: "delete", blankConditionIds };
+  const conditions = s.rooms.filter((c) => c.locationId === locationId);
+  for (const c of conditions) if (locked(c.inspectionId)) lockedIds.add(c.inspectionId);
+  const open = conditions.filter((c) => !locked(c.inspectionId));
+  const base = {
+    deleteEquipment, retireEquipment, deleteResultIds: [...deleteResultIds],
+    conditionIds: open.map((c) => c.id), measuredConditions: open.filter((c) => !blankConditions(c)),
+    historicalInspectionCount: lockedIds.size,
+  };
+  return lockedIds.size || retireEquipment.length ? { kind: "archive", ...base } : { kind: "delete", ...base };
+}
+
+/** The confirmation sentence for a removable room. */
+export function removalSummary(plan: Extract<RoomRemoval, { kind: "delete" | "archive" }>): string {
+  const n = plan.deleteEquipment.length;
+  if (n === 0) return "This room has no uninspected equipment to delete. Delete the room?";
+  return `This room contains ${n} uninspected equipment item${n === 1 ? "" : "s"}. Delete the room and ${n === 1 ? "the item" : `all ${n} items`}?`;
 }

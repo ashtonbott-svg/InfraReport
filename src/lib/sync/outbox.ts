@@ -61,6 +61,8 @@ export interface SyncData {
   orphans: Record<string, Row>;
   lastPushOkAt: number | null;
   lastPullOkAt: number | null;
+  /** Records this device deleted on the server; if they come back (Undo) they are restored, not re-created. */
+  deletedByMe?: Record<string, true>;
   /** Last unsent-change counts this device reported per inspection ("pending|failed"). */
   reported?: Record<string, string>;
   reportedAt?: number;
@@ -84,6 +86,7 @@ export function diffFields(a: Row, b: Row): string[] {
  */
 export function recordChanges(data: SyncData, prev: Map<string, SyncRecord>, next: Map<string, SyncRecord>, nowMs = Date.now()): SyncData {
   const ops = { ...data.ops };
+  let deleted = data.deletedByMe;
   let touched = false;
   for (const [key, rec] of next) {
     const before = prev.get(key);
@@ -92,8 +95,15 @@ export function recordChanges(data: SyncData, prev: Map<string, SyncRecord>, nex
     const existing = ops[key];
     if (!before) {
       // Created on this device (or restored after a local delete).
+      if (!existing && deleted?.[key]) {
+        // Deleted on the server by this device earlier (Undo): bring that record back.
+        ops[key] = { ...newOp(key, rec, fieldsOf(rec.row), {}, data.versions[key] ?? null, nowMs), row: { ...rec.row, __restore: true }, sentOnce: true };
+        deleted = { ...deleted };
+        delete deleted[key];
+        continue;
+      }
       ops[key] = existing
-        ? { ...existing, kind: "upsert", row: rec.row, changed: union(existing.changed, fieldsOf(rec.row)), attempts: 0, nextAttemptAt: 0, failed: null }
+        ? { ...existing, kind: "upsert", row: keepRestore(existing, rec.row), changed: union(existing.changed, fieldsOf(rec.row)), attempts: 0, nextAttemptAt: 0, failed: null }
         : newOp(key, rec, fieldsOf(rec.row), {}, data.versions[key] ?? null, nowMs);
       continue;
     }
@@ -101,7 +111,7 @@ export function recordChanges(data: SyncData, prev: Map<string, SyncRecord>, nex
     if (existing) {
       const base = { ...existing.base };
       for (const f of changed) if (!existing.changed.includes(f)) base[f] = before.row[f];
-      ops[key] = { ...existing, kind: "upsert", row: rec.row, changed: union(existing.changed, changed), base, attempts: 0, nextAttemptAt: 0, failed: null };
+      ops[key] = { ...existing, kind: "upsert", row: keepRestore(existing, rec.row), changed: union(existing.changed, changed), base, attempts: 0, nextAttemptAt: 0, failed: null };
     } else {
       const base: Row = {};
       for (const f of changed) base[f] = before.row[f];
@@ -118,7 +128,17 @@ export function recordChanges(data: SyncData, prev: Map<string, SyncRecord>, nex
     }
     ops[key] = { ...(existing ?? newOp(key, rec, [], {}, data.versions[key] ?? null, nowMs)), kind: "delete", row: rec.row, attempts: 0, nextAttemptAt: 0, failed: null };
   }
-  return touched ? { ...data, ops } : data;
+  return touched ? { ...data, ops, ...(deleted !== data.deletedByMe ? { deletedByMe: deleted } : {}) } : data;
+}
+
+/** A pending restore stays a restore when the record is edited again before it uploads. */
+const keepRestore = (op: PendingOp, row: Row): Row => (op.kind === "upsert" && op.row.__restore ? { ...row, __restore: true } : row);
+
+/** Remember a server delete made by this device (bounded). */
+export function rememberDeleted(data: SyncData, key: string): SyncData {
+  const keys = Object.keys(data.deletedByMe ?? {});
+  const kept = keys.length >= 2000 ? keys.slice(-1000) : keys;
+  return { ...data, deletedByMe: { ...Object.fromEntries(kept.map((k) => [k, true as const])), [key]: true } };
 }
 
 function newOp(key: string, rec: SyncRecord, changed: string[], base: Row, baseVersion: number | null, nowMs: number): PendingOp {

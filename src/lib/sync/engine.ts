@@ -20,7 +20,7 @@ import {
   toInspection, toLocation, toResult, toRoom, type Row, type SyncRecord, type TableName,
 } from "./mapping";
 import {
-  backoffMs, decideField, emptySyncData, orderedOps, recordChanges, settleOp, type Conflict, type PendingOp, type SyncData,
+  backoffMs, decideField, emptySyncData, orderedOps, recordChanges, rememberDeleted, settleOp, type Conflict, type PendingOp, type SyncData,
 } from "./outbox";
 
 type Shared = Pick<DataState, "customers" | "facilities" | "locations" | "equipment" | "inspections" | "rooms" | "results" | "reviewEvents" | "exteriorChecks">;
@@ -357,10 +357,10 @@ export class SyncEngine {
     if (op.baseVersion !== null && !op.row.__force) q = q.eq("version", op.baseVersion);
     const res = await q.select();
     if (res.error) return this.fail(op, classify(res.error, res.status), res.error.message);
-    if ((res.data ?? []).length) { this.save(settleOp(this.data, op.key, {}, null, (res.data as Row[])[0].version as number)); return "ok"; }
+    if ((res.data ?? []).length) { this.save(rememberDeleted(settleOp(this.data, op.key, {}, null, (res.data as Row[])[0].version as number), op.key)); return "ok"; }
     const got = await this.fetchRow(op.table, op.id);
     if (got.err) return this.fail(op, classify(got.err, got.status), got.err.message);
-    if (!got.row || got.row.deleted_at) { this.save(settleOp(this.data, op.key, {}, null, null)); return "ok"; }
+    if (!got.row || got.row.deleted_at) { this.save(rememberDeleted(settleOp(this.data, op.key, {}, null, got.row ? (got.row.version as number) : null), op.key)); return "ok"; }
     // Someone else edited the record after I last saw it: do not delete their work silently.
     this.addConflicts([{ key: op.key, table: op.table, recordId: op.id, field: "__delete", mine: "Delete it", theirs: "Keep it (changed on another device)", theirsVersion: got.row.version as number, theirsBy: (got.row.updated_by as string) ?? null }]);
     const ops = { ...this.data.ops };
@@ -489,6 +489,21 @@ export class SyncEngine {
     const newConflicts: Omit<Conflict, "id" | "at">[] = [];
     const writes: { table: TableName; row: Row }[] = [];
     const removals: { table: TableName; id: string }[] = [];
+    // Work that exists only on this phone (photos never upload; unsent edits) is never removed
+    // because another device deleted the record: the inspector decides on the Sync page.
+    // A line kept that way keeps its images, equipment and room until the inspector decides.
+    const st = this.d.getState();
+    const photoResults = new Set((st.photos ?? []).map((p) => p.resultId).filter(Boolean) as string[]);
+    const pending = (key: string) => this.data.ops[key]?.kind === "upsert" || this.data.conflicts.some((c) => c.key === key);
+    const keptResults = new Set(st.results.filter((r) => photoResults.has(r.id) || pending(`results:${r.id}`) || r.images.some((i) => pending(`thermal_images:${i.id}`))).map((r) => r.id));
+    const keptEquipment = new Set(st.results.filter((r) => keptResults.has(r.id)).map((r) => r.equipmentId));
+    const keptLocations = new Set([
+      ...st.results.filter((r) => keptResults.has(r.id)).map((r) => r.locationId),
+      ...st.equipment.filter((e) => keptEquipment.has(e.id)).map((e) => e.locationId),
+    ]);
+    const keepLocal = (t: TableName, id: string, row: Row) =>
+      (t === "results" && keptResults.has(id)) || (t === "equipment" && keptEquipment.has(id)) || (t === "locations" && keptLocations.has(id))
+      || (t === "thermal_images" && keptResults.has(String(row.result_id)));
     for (const t of TABLE_ORDER) {
       for (const row of fetched[t] ?? []) {
         const id = String(row.id);
@@ -496,8 +511,11 @@ export class SyncEngine {
         const op = this.data.ops[key];
         const version = (row.version as number | undefined) ?? 0;
         if (row.deleted_at) {
-          if (op && op.kind === "upsert") {
-            if (!this.data.conflicts.some((c) => c.key === key)) newConflicts.push({ key, table: t, recordId: id, field: "__deleted", mine: "Keep my version", theirs: "Deleted on another device", theirsVersion: version, theirsBy: (row.updated_by as string) ?? null });
+          const decided = this.data.conflicts.some((c) => c.key === key);
+          if ((op && op.kind === "upsert") || (!op && this.last.has(key) && keepLocal(t, id, row))) {
+            if (!decided) newConflicts.push({ key, table: t, recordId: id, field: "__deleted", mine: "Keep my version", theirs: "Deleted on another device", theirsVersion: version, theirsBy: (row.updated_by as string) ?? null });
+          } else if (decided) {
+            // A decision is waiting on the Sync page: keep the local record until it is made.
           } else if (this.last.has(key) || t === "thermal_images") removals.push({ table: t, id });
           versions[key] = version;
           continue;

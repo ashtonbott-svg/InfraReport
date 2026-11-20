@@ -13,6 +13,7 @@ import { ApprovalBanner } from "@/components/inspection/approval";
 import { RoomConditionsCard, RoomRail, type RoomEntry } from "@/components/inspection/room-panels";
 import { EquipmentGrid, QuickAddBar, type GridRow } from "@/components/inspection/equipment-grid";
 import { AddRoomSheet, RoomConditionsSheet, RoomPickerSheet, conditionSummary } from "@/components/field/room-sheets";
+import { DeleteRoomSheet } from "@/components/field/delete-room-sheet";
 import { EquipmentSheet, nameSuggestions } from "@/components/field/equipment-sheet";
 import { ReorderSheet } from "@/components/field/reorder-sheet";
 import { ExteriorReminder, useFieldState } from "@/components/field/exterior-photos";
@@ -150,7 +151,7 @@ function EntryWorkspace() {
   const [q, setQ] = useState("");
   const [filter, setFilter] = useState<RowFilter>("all");
   const [showFilters, setShowFilters] = useState(false);
-  const [sheet, setSheet] = useState<null | "add-room" | "pick-room" | "conditions" | "add-eq" | "edit-eq" | "checkpoint" | "reorder">(null);
+  const [sheet, setSheet] = useState<null | "add-room" | "pick-room" | "conditions" | "delete-room" | "add-eq" | "edit-eq" | "checkpoint" | "reorder">(null);
   const [insertAfter, setInsertAfter] = useState<string | null>(null);
   const [editId, setEditId] = useState<string | null>(null);
 
@@ -297,7 +298,9 @@ function EntryWorkspace() {
         onUseExisting={(locId) => { addExistingRoom(locId); toast("Existing room added. Enter its conditions."); }} />
       <RoomPickerSheet open={sheet === "pick-room"} onClose={() => setSheet(null)} rooms={rooms} selected={selected} total={dataset.results.length}
         onSelect={(l) => { selectRoom(l); setSheet(null); }} onAddRoom={() => setSheet("add-room")} otherRooms={otherRooms} onAddExisting={addExistingRoom} />
-      <RoomConditionsSheet open={sheet === "conditions"} onClose={() => setSheet(null)} info={current} inspectionDate={inspection.date} knownBuildings={field.knownBuildings} />
+      <RoomConditionsSheet open={sheet === "conditions"} onClose={() => setSheet(null)} info={current} inspectionDate={inspection.date} knownBuildings={field.knownBuildings}
+        onDeleteRoom={isInspectionLocked(inspection) ? undefined : () => setSheet("delete-room")} />
+      {sheet === "delete-room" && current ? <DeleteRoomSheet open onClose={() => setSheet(null)} locationId={current.location.id} /> : null}
       {sheet === "add-eq" || sheet === "edit-eq" ? (
         <EquipmentSheet open mode={sheet === "add-eq" ? "create" : "edit"} onClose={() => { setSheet(null); setInsertAfter(null); }} inspection={inspection}
           afterResultId={sheet === "add-eq" ? insertAfter : null}
@@ -356,7 +359,7 @@ function EntryWorkspace() {
               {current ? (
                 <>
                   <div className="mt-2"><RoomStatusBanner room={current.room} onEdit={() => setSheet("conditions")} /></div>
-                  <button onClick={() => setSheet("conditions")} className="mt-1 flex w-full items-center gap-2 rounded-lg px-1 py-1.5 text-left text-sm text-slate-600 active:bg-slate-100">
+                  <button data-testid="room-conditions-edit" onClick={() => setSheet("conditions")} className="mt-1 flex w-full items-center gap-2 rounded-lg px-1 py-1.5 text-left text-sm text-slate-600 active:bg-slate-100">
                     <SlidersHorizontal className="h-4 w-4 shrink-0 text-slate-400" />
                     <span className="flex-1 truncate">{conditionSummary(current.room)}</span>
                     <span className="text-xs font-medium text-heat-700">Edit</span>
