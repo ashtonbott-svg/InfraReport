@@ -43,7 +43,7 @@ export function facilityRow(f: Facility): Row {
   return { id: f.id, organization_id: f.organizationId, customer_id: f.customerId, name: f.name, address: f.address, city: f.city, state: f.state, postal_code: f.postalCode, notes: f.notes };
 }
 export function locationRow(l: Location): Row {
-  return { id: l.id, organization_id: l.organizationId, facility_id: l.facilityId, building: l.building, name: l.name, area: l.area, sort_order: l.sortOrder };
+  return { id: l.id, organization_id: l.organizationId, facility_id: l.facilityId, building: l.building, name: l.name, area: l.area, sort_order: l.sortOrder, archived_at: l.archivedAt ?? null };
 }
 export function equipmentRow(e: Equipment): Row {
   return { id: e.id, organization_id: e.organizationId, facility_id: e.facilityId, location_id: e.locationId, name: e.name, equipment_type: e.equipmentType, default_component: e.defaultComponent, identifiers: S(e.identifiers), imported_from: S(e.importedFrom), active: e.active, sort_order: e.sortOrder };
@@ -106,7 +106,7 @@ export function toFacility(r: Row): Facility {
   return { id: S(r.id), organizationId: S(r.organization_id), customerId: S(r.customer_id), name: S(r.name), address: S(r.address), city: S(r.city), state: S(r.state), postalCode: S(r.postal_code), notes: S(r.notes), createdAt: S(r.created_at) };
 }
 export function toLocation(r: Row): Location {
-  return { id: S(r.id), organizationId: S(r.organization_id), facilityId: S(r.facility_id), building: S(r.building), name: S(r.name), area: S(r.area), sortOrder: num(r.sort_order) };
+  return { id: S(r.id), organizationId: S(r.organization_id), facilityId: S(r.facility_id), building: S(r.building), name: S(r.name), area: S(r.area), sortOrder: num(r.sort_order), archivedAt: (r.archived_at as string | null | undefined) ?? null };
 }
 export function toEquipment(r: Row): Equipment {
   return { id: S(r.id), organizationId: S(r.organization_id), facilityId: S(r.facility_id), locationId: S(r.location_id), name: S(r.name), equipmentType: S(r.equipment_type), defaultComponent: S(r.default_component), identifiers: S(r.identifiers) || undefined, importedFrom: S(r.imported_from) || undefined, active: r.active !== false, sortOrder: num(r.sort_order), createdAt: S(r.created_at) };

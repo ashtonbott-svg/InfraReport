@@ -120,7 +120,7 @@ describe("To Do, recorded and exceptions", () => {
     const { byName } = job();
     const d2 = byName("Disconnect D2");
     S().updateResult(d2.id, { opened: "Item is Locked Out" });
-    expect(resultStatus(byName("Disconnect D2"))).toBe("todo"); // access status alone does not count
+    expect(resultStatus(byName("Disconnect D2"))).toBe("not-scanned"); // a documented limitation in Opened counts as not scanned
     S().setException(d2.id, { kind: "not-scanned", note: "LOTO" });
     expect(resultStatus(byName("Disconnect D2"))).toBe("not-scanned");
     S().setException(d2.id, { kind: "deferred", note: "" });

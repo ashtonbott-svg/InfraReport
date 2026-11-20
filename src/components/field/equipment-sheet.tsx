@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useMemo, useRef, useState } from "react";
-import { Camera, Check, ChevronDown, ChevronLeft, ChevronRight, Copy, ImageOff, ListPlus, Loader2, Pencil, Plus, RotateCcw, Trash2, Undo2, X } from "lucide-react";
+import { ArrowRightLeft, Camera, Check, ChevronDown, ChevronLeft, ChevronRight, Copy, ImageOff, ListPlus, Loader2, Pencil, Plus, RotateCcw, Trash2, Undo2, X } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Sheet } from "@/components/ui/sheet";
 import { toast } from "@/components/ui/toast";
@@ -10,11 +10,13 @@ import { allowedCauses, isInspectionLocked, useStore } from "@/lib/store/store";
 import { useDraft, useOnOpen } from "@/lib/use-draft";
 import { DEFAULT_OPENED, EQUIPMENT_PRESETS, LIMITED_ACCESS_OPENED, OPENED_VALUES, OTHER_EQUIPMENT_TYPE, POSSIBLE_CAUSE_NONE } from "@/lib/domain/constants";
 import { defaultComponentForType, inferTypeFromName, resolveEffective } from "@/lib/domain/rules";
-import { IMAGE_COMPONENTS, VIEW_PRESETS, imageHasFinding, newThermalImage, nextComponent, patchThermalImage, planViews, resultStatus, roomProgress, type ViewPlan } from "@/lib/domain/thermal";
+import { IMAGE_COMPONENTS, VIEW_PRESETS, imageHasFinding, imageHasNumber, isLimitedAccess, newThermalImage, nextComponent, patchThermalImage, planViews, resultStatus, roomProgress, type ViewPlan } from "@/lib/domain/thermal";
 import { applyTypeSuggestion, filterOpened, nameMatches, nextSequentialNames, splitLastToken, typeSuggestions } from "@/lib/domain/suggest";
 import { persistPhoto } from "@/lib/photos/capture";
 import { deletePhotoBlob } from "@/lib/photos/photo-db";
 import { usePhotoUrl } from "@/lib/photos/use-photo-url";
+import { locationLabel } from "@/lib/domain/csv";
+import { MoveToRoomSheet } from "@/components/field/move-room-sheet";
 import type { Equipment, Inspection, InspectionResult, InspectionRoomConditions, Photo, ResultException, ResultExceptionKind, ResultOverrides, ThermalImage } from "@/lib/domain/types";
 
 /** Kept for existing imports: next sequential names in a room. */
@@ -366,20 +368,31 @@ function ImagesEditor({ images, activeId, setActiveId, onPatch, onAdd, onRemove,
   );
 }
 
-function ExceptionPanel({ opened, exception, onOpened, onException }: {
+function ExceptionPanel({ opened, exception, onOpened, onException, scanned }: {
   opened: string; exception: ResultException | null; onOpened: (v: string) => void; onException: (e: { kind: ResultExceptionKind; note: string } | null) => void;
+  /** An image entry already has an image number (scanned through a cover, dead front or surface). */
+  scanned: boolean;
 }) {
-  const [open, setOpen] = useState(!!exception);
+  const [open, setOpen] = useState(!!exception || isLimitedAccess(opened));
   const [note, setNote] = useDraft(exception?.note ?? "");
+  // Choosing why the item could not be scanned documents it as Not Scanned (never over real image numbers).
+  const pickOpened = (v: string) => {
+    onOpened(v);
+    if (!exception && !scanned && isLimitedAccess(v)) onException({ kind: "not-scanned", note });
+  };
+  const saveNote = () => {
+    if (exception) { if (note !== exception.note) onException({ kind: exception.kind, note }); }
+    else if (note.trim() && !scanned && isLimitedAccess(opened)) onException({ kind: "not-scanned", note });
+  };
   if (!open && !exception) {
     return <button type="button" onClick={() => setOpen(true)} className="w-full rounded-lg py-2 text-left text-sm font-medium text-slate-600 underline-offset-2 hover:underline">Can&apos;t scan this item? Locked out, off, inaccessible…</button>;
   }
   return (
     <div className="space-y-3 rounded-xl border border-amber-300 bg-amber-50 p-3">
       <div className="text-sm font-semibold text-amber-950">Not scanned / deferred</div>
-      <OpenedCombobox id="exc-opened" value={OPENED_VALUES.includes(opened as never) ? opened : DEFAULT_OPENED} onChange={onOpened} />
+      <OpenedCombobox id="exc-opened" value={OPENED_VALUES.includes(opened as never) ? opened : DEFAULT_OPENED} onChange={pickOpened} />
       <input aria-label="Exception note" placeholder="Note (optional)" className={cn(big, "h-11")} value={note} onChange={(e) => setNote(e.target.value)}
-        onBlur={() => exception && note !== exception.note && onException({ kind: exception.kind, note })} />
+        onBlur={saveNote} />
       <div className="grid grid-cols-2 gap-2">
         <Button variant={exception?.kind === "not-scanned" ? "dark" : "secondary"} className="h-11 justify-center" onClick={() => onException({ kind: "not-scanned", note })}>Not Scanned</Button>
         <Button variant={exception?.kind === "deferred" ? "dark" : "secondary"} className="h-11 justify-center" onClick={() => onException({ kind: "deferred", note })}>Defer (Come Back)</Button>
@@ -551,6 +564,8 @@ function EditSheet({ open, onClose, inspection, room, row, next, prev, onNavigat
 }) {
   const { updateResult, updateEquipment, updateThermalImage: updateImage, addThermalImage: addImage, removeThermalImage: removeImage, setException, setOverride, duplicateResult, deleteResult, removePhotoRecord } = useStore();
   const photos = useStore((s) => s.photos);
+  const locations = useStore((s) => s.locations);
+  const [moving, setMoving] = useState(false);
   const causes = useCauses();
   const r = row.result;
   const eq = row.equipment;
@@ -588,7 +603,9 @@ function EditSheet({ open, onClose, inspection, room, row, next, prev, onNavigat
   const statusChip = { todo: ["To do", "bg-slate-100 text-slate-600"], recorded: ["Done", "bg-emerald-100 text-emerald-800"], "not-scanned": ["Not scanned", "bg-amber-100 text-amber-900"], deferred: ["Deferred", "bg-amber-100 text-amber-900"] }[status];
 
   return (
-    <Sheet open={open} onClose={onClose} size="lg"
+    <>
+    {eq ? <MoveToRoomSheet open={moving} onClose={() => setMoving(false)} equipmentId={eq.id} onMoved={() => onClose()} /> : null}
+    <Sheet open={open && !moving} onClose={onClose} size="lg"
       title={<span className="flex items-center gap-2"><span className="truncate">{eq?.name || "Equipment"}</span><span className={cn("shrink-0 rounded-full px-2 py-0.5 text-xs font-semibold", statusChip[1])} data-testid="item-status">{statusChip[0]}</span></span>}
       labelledBy={eq?.name}
       subtitle={`Item ${index + 1} · ${progressLine(rows, roomName)}`}
@@ -602,6 +619,17 @@ function EditSheet({ open, onClose, inspection, room, row, next, prev, onNavigat
       }>
       <div className="space-y-4">
         <EquipmentNameRow key={eq?.id} equipment={eq} locked={isInspectionLocked(inspection)} />
+        {eq ? (
+          <div className="flex items-center gap-2">
+            <div className="min-w-0 flex-1">
+              <div className="text-[11px] font-semibold uppercase tracking-wide text-slate-500">Room</div>
+              <div className="truncate text-sm font-medium text-slate-800" data-testid="equipment-room">{locationLabel(locations.find((l) => l.id === r.locationId)) || roomName || "No room"}</div>
+            </div>
+            <Button type="button" className="h-11 shrink-0 px-3" disabled={isInspectionLocked(inspection)} onClick={() => setMoving(true)} data-testid="move-to-room">
+              <ArrowRightLeft className="h-4 w-4" />Move to Room
+            </Button>
+          </div>
+        ) : null}
         <ImagesEditor idPrefix="ed" images={r.images} activeId={activeId} setActiveId={setActiveId} causes={causes}
           onPatch={(iid, p) => updateImage(r.id, iid, p)}
           equipmentName={eq?.name ?? ""} fullComponent={eq?.defaultComponent || defaultComponentForType(eq?.equipmentType ?? "") || "Full Equipment"}
@@ -613,7 +641,7 @@ function EditSheet({ open, onClose, inspection, room, row, next, prev, onNavigat
           onAdd={() => { const id = addImage(r.id, { component: nextComponent(r.images.map((x) => x.component)) }); setActiveId(id); }}
           onRemove={(iid) => { const img = r.images.find((x) => x.id === iid); if (confirm(`Remove ${img?.component || "this image"}${img?.irImageNumber ? ` (IR ${img.irImageNumber})` : ""}?`)) { removeImage(r.id, iid); if (iid === activeId) setActiveId(r.images.find((x) => x.id !== iid)?.id ?? ""); } }} />
 
-        <ExceptionPanel opened={r.opened} exception={r.exception} onOpened={(o) => updateResult(r.id, { opened: o })} onException={(e) => setException(r.id, e)} />
+        <ExceptionPanel opened={r.opened} exception={r.exception} scanned={r.images.some(imageHasNumber)} onOpened={(o) => updateResult(r.id, { opened: o })} onException={(e) => setException(r.id, e)} />
 
         {onAddAfter && !isInspectionLocked(inspection) ? (
           <Button type="button" className="h-11 w-full justify-center" onClick={() => onAddAfter(r.id)} data-testid="add-after">
@@ -662,5 +690,6 @@ function EditSheet({ open, onClose, inspection, room, row, next, prev, onNavigat
         ) : null}
       </div>
     </Sheet>
+    </>
   );
 }

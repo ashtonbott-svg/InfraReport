@@ -48,7 +48,7 @@ function NewInspectionForm() {
   const facilityId = custFacilities.some((f) => f.id === facilityChoice) ? facilityChoice : custFacilities.length === 1 ? custFacilities[0].id : "";
 
   const eqCount = equipment.filter((e) => e.facilityId === facilityId && e.active).length;
-  const roomCount = locations.filter((l) => l.facilityId === facilityId).length;
+  const roomCount = locations.filter((l) => l.facilityId === facilityId && !l.archivedAt).length;
   const last = inspections.filter((i) => i.facilityId === facilityId).sort((a, b) => b.date.localeCompare(a.date))[0];
   const valid = customerId && facilityId && date && inspectorIds.length > 0;
 

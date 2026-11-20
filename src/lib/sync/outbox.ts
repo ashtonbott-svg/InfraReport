@@ -131,11 +131,14 @@ const union = (a: string[], b: string[]) => [...new Set([...a, ...b])];
 /** Push order: parents first, then oldest first. */
 export function orderedOps(data: SyncData): PendingOp[] {
   const rank = (t: TableName) => TABLE_ORDER.indexOf(t);
+  // Archiving a room is checked against its equipment and equipment lines, so it goes after
+  // the moves that emptied it, together with the deletes.
+  const late = (o: PendingOp) => o.kind === "delete" || (o.table === "locations" && o.changed.includes("archived_at") && !!o.row.archived_at);
   return Object.values(data.ops).sort((a, b) => {
     // Deletes of children before parents; inserts/updates of parents before children.
-    const da = a.kind === "delete" ? -rank(a.table) : rank(a.table);
-    const db = b.kind === "delete" ? -rank(b.table) : rank(b.table);
-    const ka = a.kind === "delete" ? 1 : 0, kb = b.kind === "delete" ? 1 : 0;
+    const da = late(a) ? -rank(a.table) : rank(a.table);
+    const db = late(b) ? -rank(b.table) : rank(b.table);
+    const ka = late(a) ? 1 : 0, kb = late(b) ? 1 : 0;
     return ka - kb || da - db || a.createdAt - b.createdAt;
   });
 }

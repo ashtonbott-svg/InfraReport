@@ -221,7 +221,7 @@ function EntryWorkspace() {
   const current = rooms.find((r) => r.location.id === selected) ?? null;
   const roomResults = dataset.results.filter((r) => r.locationId === selected);
   const usedLocationIds = new Set(rooms.map((r) => r.location.id));
-  const otherRooms = locations.filter((l) => l.facilityId === inspection.facilityId && !usedLocationIds.has(l.id));
+  const otherRooms = locations.filter((l) => l.facilityId === inspection.facilityId && !l.archivedAt && !usedLocationIds.has(l.id));
   const isActive = activeId === inspection.id;
   const visit = inspection.siteVisit;
 
@@ -293,7 +293,7 @@ function EntryWorkspace() {
   const sheets = (
     <>
       <AddRoomSheet open={sheet === "add-room"} onClose={() => setSheet(null)} inspectionId={inspection.id} previous={current ?? rooms[rooms.length - 1] ?? null} knownBuildings={field.knownBuildings} onCreated={onRoomCreated}
-        facilityRooms={locations.filter((l) => l.facilityId === inspection.facilityId).map((l) => ({ id: l.id, name: l.name, building: l.building, inInspection: usedLocationIds.has(l.id) }))}
+        facilityRooms={locations.filter((l) => l.facilityId === inspection.facilityId && !l.archivedAt).map((l) => ({ id: l.id, name: l.name, building: l.building, inInspection: usedLocationIds.has(l.id) }))}
         onUseExisting={(locId) => { addExistingRoom(locId); toast("Existing room added. Enter its conditions."); }} />
       <RoomPickerSheet open={sheet === "pick-room"} onClose={() => setSheet(null)} rooms={rooms} selected={selected} total={dataset.results.length}
         onSelect={(l) => { selectRoom(l); setSheet(null); }} onAddRoom={() => setSheet("add-room")} otherRooms={otherRooms} onAddExisting={addExistingRoom} />

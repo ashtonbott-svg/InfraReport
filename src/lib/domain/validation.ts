@@ -1,9 +1,9 @@
 import { OPENED_VALUES, POSSIBLE_CAUSE_NONE } from "./constants";
 import { isNumericText, resolveEffective } from "./rules";
-import { imageHasNumber, resultStatus } from "./thermal";
+import { imageHasNumber, isLimitedAccess, resultStatus } from "./thermal";
 import type { ExportDataset } from "./csv";
 import { orderResults } from "./csv";
-import type { InspectionResult } from "./types";
+import type { InspectionResult, ThermalImage } from "./types";
 
 export type Severity = "error" | "warning" | "info";
 
@@ -17,6 +17,9 @@ export interface ValidationIssue {
 }
 
 const OPENED_SET = new Set<string>(OPENED_VALUES);
+
+/** An image entry nobody has filled in (only its component label). */
+const isEmptyImage = (i: ThermalImage) => !imageHasNumber(i) && !i.distance && !i.maxTemp && !i.notes.trim() && (!i.possibleCause || i.possibleCause === POSSIBLE_CAUSE_NONE);
 
 /**
  * Validation never changes data. It flags what an inspector or reviewer must
@@ -75,14 +78,26 @@ export function validateInspection(
     const status = resultStatus(r);
     if (status === "todo") push(r, "warning", "IR Image Number", `${name}: Not inspected yet (To Do). The row is kept and exported.`);
     if (status === "deferred") push(r, "warning", "Opened", `${name}: Deferred${r.exception?.note ? `: ${r.exception.note}` : ""}. Return to it before finishing.`);
+    // Not scanned: no image number or distance is expected. It still needs a reason.
+    if (status === "not-scanned" && !isLimitedAccess(r.opened) && !r.exception?.note.trim() && !r.reviewNotes.trim()) {
+      push(r, "warning", "Opened", `${name}: Marked Not Scanned without a reason. Choose why in Opened (locked out, off, inaccessible…) or add a note.`);
+    }
 
+    // Empty image placeholders on a scanned item: one warning per item, not one per placeholder.
+    const placeholders: string[] = [];
     r.images.forEach((img, idx) => {
       const label = r.images.length > 1 ? `${name} (image ${idx + 1}${img.component ? `, ${img.component}` : ""})` : name;
+      const empty = isEmptyImage(img);
+      // A documented not-scanned item keeps its blank placeholder for the export row; nothing on it to check.
+      if (status === "not-scanned" && empty) return;
+      if (status === "recorded" && !imageHasNumber(img)) {
+        if (empty) { placeholders.push(img.component.trim() || `image ${idx + 1}`); return; }
+        push(r, "warning", "IR Image Number", `${label}: Readings were entered but this image entry has no image number.`);
+      }
       if (!img.component.trim()) push(r, "warning", "Component", `${label}: Component is blank.`);
       for (const [l, v] of [["Distance", img.distance], ["Max Temp", img.maxTemp]] as const) {
         if (v !== "" && !isNumericText(v)) push(r, "error", l, `${label}: ${l} "${v}" must be a number with no unit text.`);
       }
-      if (status === "recorded" && !imageHasNumber(img)) push(r, "warning", "IR Image Number", `${label}: No image number on this image entry.`);
       if (imageHasNumber(img) && img.distance === "") push(r, "info", "Distance", `${label}: Distance is blank.`);
       const cause = img.possibleCause || POSSIBLE_CAUSE_NONE;
       if (!causeSet.has(cause)) push(r, "warning", "Possible Cause", `${label}: "${cause}" is not in the controlled cause list.`);
@@ -95,6 +110,11 @@ export function validateInspection(
         imageUse.set(n, list);
       }
     });
+    if (placeholders.length) {
+      push(r, "warning", "IR Image Number", placeholders.length === 1
+        ? `${name}: The ${placeholders[0]} image entry has no image number. Enter it or remove the entry.`
+        : `${name}: ${placeholders.length} image entries have no image number (${placeholders.join(", ")}). Enter them or remove the entries.`);
+    }
   }
 
   for (const [num, ids] of imageUse) {

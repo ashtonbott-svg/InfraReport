@@ -50,8 +50,10 @@ import type {
 } from "../domain/types";
 import { DEFAULT_ORG_ID as DEMO_ORG_ID, ASHTON_ID, LEGACY_DEMO_IDS, THERMOGRAPHERS, buildSeed } from "./seed";
 import { checkExit, exteriorCheckId, newSiteVisit, requiredBuildings, type ExitCheck } from "../domain/site-visit";
-import { checkRoom, newThermalImage, patchThermalImage } from "../domain/thermal";
+import { checkRoom, isAddressed, newThermalImage, patchThermalImage } from "../domain/thermal";
 import { trackedLocalStorage } from "./save-status";
+import { locationLabel } from "../domain/csv";
+import { planEquipmentMove, planRoomRemoval, type RoomRemoval } from "../domain/room-moves";
 
 export const SCHEMA_VERSION = 4;
 
@@ -127,6 +129,18 @@ export interface Actions {
   createLocation(input: Omit<Location, "id" | "organizationId" | "sortOrder">): ID;
   updateLocation(id: ID, patch: Partial<Location>): void;
   deleteLocation(id: ID): boolean;
+  /**
+   * Move an item of equipment to another room of its facility. The equipment keeps its identity;
+   * its line in every open inspection moves with it (readings, images, notes and photos stay on
+   * the line). Approved inspections keep the room the item was inspected in.
+   * keepRecordedConditions: lines with recorded data keep the previous room's conditions as
+   * item overrides instead of taking the new room's conditions.
+   */
+  moveEquipmentToRoom(equipmentId: ID, toLocationId: ID, opts?: { keepRecordedConditions?: boolean }): { lines: number; locked: number } | null;
+  /** Delete an unused room, or archive one that only approved reports use. Never removes equipment or inspection data. */
+  removeRoom(locationId: ID): RoomRemoval;
+  /** Bring an archived room back into the active inventory. */
+  restoreRoom(locationId: ID): void;
   createEquipment(input: Omit<Equipment, "id" | "organizationId" | "createdAt" | "sortOrder" | "active">): ID;
   updateEquipment(id: ID, patch: Partial<Equipment>): void;
   createInspection(input: {
@@ -303,6 +317,57 @@ export const storeInitializer: StateCreator<Store> = (set, get) => {
           return true;
         },
 
+        moveEquipmentToRoom(equipmentId, toLocationId, opts) {
+          const s = get();
+          const plan = planEquipmentMove({ ...s, isLocked: isInspectionLocked }, equipmentId, toLocationId);
+          if (!plan || plan.equipment.locationId === toLocationId && plan.lines.length === 0) return null;
+          const { equipment: e, to } = plan;
+          // Inventory order: right after the last item of the destination room.
+          const facilityEq = s.equipment.filter((x) => x.facilityId === e.facilityId && x.id !== e.id).sort((a, b) => a.sortOrder - b.sortOrder);
+          const inDest = facilityEq.filter((x) => x.locationId === toLocationId);
+          const last = inDest.length ? inDest[inDest.length - 1].sortOrder : undefined;
+          const nextAfter = last === undefined ? undefined : facilityEq.find((x) => x.sortOrder > last)?.sortOrder;
+          const eqOrder = last === undefined
+            ? Math.max(0, ...facilityEq.map((x) => x.sortOrder)) + 1
+            : slotBetween(last, nextAfter) ?? Math.max(0, ...facilityEq.map((x) => x.sortOrder)) + 1;
+          const fromName = plan.from ? locationLabel(plan.from) : "previous room";
+          set((st) => ({ equipment: st.equipment.map((x) => (x.id === e.id ? { ...x, locationId: toLocationId, sortOrder: eqOrder } : x)) }));
+          for (const line of plan.lines) {
+            const inspId = line.inspection.id;
+            const rcId = get().addRoomToInspection(inspId, toLocationId);
+            if (!rcId) continue;
+            const destOrder = roomOrder(get().results, { inspectionId: inspId, locationId: toLocationId });
+            const sortOrder = slotBetween(destOrder[destOrder.length - 1]?.sortOrder, undefined) ?? Date.now();
+            const keep = opts?.keepRecordedConditions && line.changedConditions.length > 0;
+            const overrides = { ...line.result.overrides };
+            if (keep) for (const c of line.changedConditions) overrides[c.key] = c.from;
+            set((st) => ({
+              results: st.results.map((x) => (x.id === line.result.id ? { ...x, locationId: toLocationId, sortOrder, overrides, updatedAt: now() } : x)),
+              // A finished room gets an item still to do: it is open again.
+              rooms: st.rooms.map((r) => (r.id === rcId && r.completedAt && !isAddressed(line.result) ? { ...r, completedAt: null } : r)),
+            }));
+            get().logEvent(inspId, "Equipment moved", `${e.name}: ${fromName} to ${locationLabel(to)}${keep ? ` (kept the conditions measured in ${fromName})` : ""}`);
+            touch(inspId);
+          }
+          return { lines: plan.lines.length, locked: plan.lockedCount };
+        },
+        removeRoom(locationId) {
+          const s = get();
+          const plan = planRoomRemoval({ ...s, isLocked: isInspectionLocked }, locationId);
+          if (plan.kind === "blocked") return plan;
+          const blank = new Set(plan.blankConditionIds);
+          set((st) => ({
+            rooms: st.rooms.filter((r) => !blank.has(r.id)),
+            locations: plan.kind === "delete"
+              ? st.locations.filter((l) => l.id !== locationId)
+              : st.locations.map((l) => (l.id === locationId ? { ...l, archivedAt: now() } : l)),
+          }));
+          return plan;
+        },
+        restoreRoom(locationId) {
+          set((s) => ({ locations: s.locations.map((l) => (l.id === locationId ? { ...l, archivedAt: null } : l)) }));
+        },
+
         createEquipment(input) {
           const id = uid("eq");
           const sortOrder = Math.max(0, ...get().equipment.filter((e) => e.facilityId === input.facilityId).map((e) => e.sortOrder)) + 1;
@@ -325,7 +390,7 @@ export const storeInitializer: StateCreator<Store> = (set, get) => {
           const rooms: InspectionRoomConditions[] = [];
           const results: InspectionResult[] = [];
           if (carryForward) {
-            const locs = s.locations.filter((l) => l.facilityId === facilityId).sort((a, b) => a.sortOrder - b.sortOrder);
+            const locs = s.locations.filter((l) => l.facilityId === facilityId && !l.archivedAt).sort((a, b) => a.sortOrder - b.sortOrder);
             for (const l of locs) {
               rooms.push({ id: uid("rc"), organizationId: org(), inspectionId: id, locationId: l.id, humidity: "", ambientTemp: "", backgroundTemp: "", distance: "", imageDate: "", conditionsCopiedFrom: null, completedAt: null });
             }
@@ -792,7 +857,7 @@ export const storeInitializer: StateCreator<Store> = (set, get) => {
         importInventory(facilityId, rows, sourceName) {
           const s = get();
           const key = (b: string, r: string) => `${b.trim().toLowerCase()}\u0000${r.trim().toLowerCase()}`;
-          const existing = new Map(s.locations.filter((l) => l.facilityId === facilityId).map((l) => [key(l.building, l.name), l.id]));
+          const existing = new Map(s.locations.filter((l) => l.facilityId === facilityId && !l.archivedAt).map((l) => [key(l.building, l.name), l.id]));
           const used = new Set<string>();
           let newRooms = 0;
           for (const row of rows) {

@@ -83,6 +83,8 @@ export interface Location {
   name: string;
   area: string; // electrical area / floor / wing
   sortOrder: number;
+  /** Set when the room was removed from the active inventory but approved reports still use it. */
+  archivedAt?: string | null;
 }
 
 /** Permanent equipment identity. Survives across inspections. */

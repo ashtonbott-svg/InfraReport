@@ -279,6 +279,28 @@ const LEGACY = {
   await until("order synced to technician", async () => (await order(J.page)) === "MCC-2,MCC-1");
   ok("5c. Reorder Equipment: MCC-2 moved above MCC-1; the order synced to the other phone");
 
+  // Technician moves MCC-1 (already has IR 201) into a new room from the equipment screen.
+  const mcc1 = await resultByName(J.page, "MCC-1");
+  const eqBefore = (await sql("select count(*)::int n from public.equipment where deleted_at is null"))[0].n;
+  await J.page.goto(BASE + `/inspections/${inspId}/entry?room=${mcc1.locationId}`);
+  await J.page.locator(`button[data-result-id="${mcc1.id}"]`).click();
+  await J.page.getByTestId("move-to-room").click();
+  if ((await J.page.getByTestId("move-current-room").innerText()).trim() !== "MCC Room") throw new Error("current room not shown");
+  await J.page.getByTestId("move-new-room").click();
+  await J.page.locator("#move-room-name").fill("Switchgear Room");
+  if (await J.page.getByTestId("move-conditions").count()) {
+    if (await J.page.getByTestId("move-confirm").isEnabled()) throw new Error("move allowed before choosing the room conditions");
+    await J.page.getByTestId("move-keep-conditions").click();
+  }
+  await shot(J.page, "05e-move-to-room");
+  await J.page.getByTestId("move-confirm").click();
+  const moved = async (p) => { const st = await store(p); const r = st.results.find((x) => x.id === mcc1.id); const l = st.locations.find((x) => x.id === r?.locationId); return r && l && l.name === "Switchgear Room" && r.images[0].irImageNumber === "201" && st.locations.filter((x) => x.name === "Switchgear Room").length === 1; };
+  if (!(await moved(J.page))) throw new Error("move not applied on the technician phone");
+  await until("move reaches the admin phone", () => moved(A.page));
+  await until("move in database", async () => (await sql("select l.name from public.results r join public.locations l on l.id = r.location_id where r.id = $1", [mcc1.id]))[0].name === "Switchgear Room");
+  if ((await sql("select count(*)::int n from public.equipment where deleted_at is null"))[0].n !== eqBefore) throw new Error("move duplicated equipment");
+  ok("5d. Move to Room: technician moved MCC-1 (IR 201) into a new Switchgear Room; same record, readings kept, no duplicate; synced to the admin phone and the database");
+
   // ---------------------------------------------------------------- 6. cloud unreachable, refresh, reconnect
   await J.ctx.route(/127\.0\.0\.1:54321/, (r) => r.abort("internetdisconnected"));
   await addRoomAndEquipment(J.page, "Generator Room", [["Panel P2", "102"]]).catch(async () => {
@@ -379,10 +401,10 @@ const LEGACY = {
   await shot(A.page, "08b-format-choice");
   const [dl1] = await Promise.all([A.page.waitForEvent("download"), A.page.getByTestId("card-download-xlsx-infinite").click()]);
   const rows1 = await readWorkbook(dl1);
-  const expected = ["Electrical Room|Panel P1A|105", "Electrical Room|Panel P1A|111", "Generator Room|Panel P2|102", "MCC Room|MCC-1|201", "MCC Room|MCC-2|202"];
+  const expected = ["Electrical Room|Panel P1A|105", "Electrical Room|Panel P1A|111", "Generator Room|Panel P2|102", "MCC Room|MCC-2|202", "Switchgear Room|MCC-1|201"];
   if (JSON.stringify(rows1) !== JSON.stringify(expected)) throw new Error("export before approval: " + JSON.stringify(rows1));
   const o = rows1.ordered;
-  if (!(o.indexOf("MCC Room|MCC-2|202") < o.indexOf("MCC Room|MCC-1|201")) || !(o.indexOf("Electrical Room|Panel P1A|111") < o.indexOf("Electrical Room|Panel P1A|105"))) throw new Error("export order: " + JSON.stringify(o));
+  if (!(o.indexOf("MCC Room|MCC-2|202") < o.indexOf("Switchgear Room|MCC-1|201")) || !(o.indexOf("Electrical Room|Panel P1A|111") < o.indexOf("Electrical Room|Panel P1A|105"))) throw new Error("export order: " + JSON.stringify(o));
   if (rows1.notes["Panel P1A|105"] !== "RC 6, A Phase, Class 2") throw new Error("note missing in export: " + JSON.stringify(rows1.notes));
   await card.getByTestId("card-download-xlsx").click();
   const [dlIrt] = await Promise.all([A.page.waitForEvent("download"), A.page.getByTestId("card-download-xlsx-irt").click()]);
@@ -468,6 +490,47 @@ const LEGACY = {
     await p.setViewportSize(devices["iPhone 13"].viewport);
   }
   ok("8b. login-era screens (jobs, sync, technicians, settings, dashboard, review) have no sideways scroll at 320px");
+
+  // ---------------------------------------------------------------- 8c. inventory: move, delete, archive (inspection is approved)
+  const approvedRows = async () => { await A.page.goto(BASE + `/inspections/${inspId}/review`); await A.page.getByTestId("header-download-xlsx").click(); const [d] = await Promise.all([A.page.waitForEvent("download"), A.page.getByTestId("header-download-xlsx-infinite").click()]); return readWorkbook(d); };
+  const reportBefore = JSON.stringify(await approvedRows());
+  const facId = (await store(A.page)).inspections.find((i) => i.id === inspId).facilityId;
+  await A.page.goto(BASE + `/facilities/${facId}`);
+  const roomSection = (n) => A.page.locator("section").filter({ has: A.page.getByRole("heading", { name: n, exact: true }) });
+  await roomSection("MCC Room").waitFor();
+  const facOver = await A.page.evaluate(() => document.documentElement.scrollWidth - window.innerWidth);
+  if (facOver > 1) throw new Error(`facility inventory scrolls sideways by ${facOver}px on a phone`);
+  await roomSection("MCC Room").getByTestId("delete-room").click();
+  await A.page.getByTestId("delete-room-dialog").getByText("This room has 1 equipment item. Move it to another room first").waitFor();
+  if (await A.page.getByTestId("confirm-delete-room").count()) throw new Error("delete offered for a room with equipment");
+  await A.page.getByRole("button", { name: "OK", exact: true }).click();
+  await roomSection("MCC Room").getByTestId("inventory-move").click();
+  await A.page.getByRole("radio", { name: /Electrical Room/ }).click();
+  await A.page.getByTestId("move-summary").getByText("approved report keeps MCC Room").waitFor();
+  await A.page.getByTestId("move-confirm").click();
+  await roomSection("Electrical Room").getByText("MCC-2").first().waitFor().catch(async () => { if (!(await roomSection("Electrical Room").locator('input[value="MCC-2"]').count())) throw new Error("MCC-2 not in Electrical Room"); });
+  await roomSection("MCC Room").getByTestId("delete-room").click();
+  await A.page.getByTestId("delete-room-dialog").getByText(/archived instead of deleted/).waitFor();
+  await shot(A.page, "10-archive-room");
+  await A.page.getByTestId("confirm-delete-room").click();
+  await A.page.getByTestId("archived-rooms").getByText("MCC Room").waitFor();
+  await until("archived in database", async () => (await sql("select archived_at is not null a, deleted_at is null d from public.locations where name = 'MCC Room'"))[0].a === true);
+  if ((await sql("select deleted_at is null d from public.locations where name = 'MCC Room'"))[0].d !== true) throw new Error("archived room was deleted");
+  await until("tech phone has the room archived and MCC-2 moved", async () => { const st = await store(J.page); const l = st.locations.find((x) => x.name === "MCC Room"); const e = st.equipment.find((x) => x.name === "MCC-2"); return l?.archivedAt && st.locations.find((x) => x.id === e?.locationId)?.name === "Electrical Room"; });
+  if (JSON.stringify(await approvedRows()) !== reportBefore) throw new Error("approved report changed after inventory move/archive");
+  // An empty room is deleted outright.
+  await A.page.goto(BASE + `/facilities/${facId}`);
+  await A.page.getByRole("button", { name: "Add Room" }).first().click();
+  await A.page.locator("#l-name").fill("Spare Room");
+  await A.page.getByRole("button", { name: "Save", exact: true }).click();
+  await until("spare room uploaded", async () => (await sql("select count(*)::int n from public.locations where name = 'Spare Room' and deleted_at is null"))[0].n === 1);
+  await until("spare room on tech phone", async () => (await store(J.page)).locations.some((x) => x.name === "Spare Room"));
+  await roomSection("Spare Room").getByTestId("delete-room").click();
+  await A.page.getByTestId("delete-room-dialog").getByText(/no equipment and no inspection uses it/).waitFor();
+  await A.page.getByTestId("confirm-delete-room").click();
+  await until("spare room deleted in database", async () => (await sql("select deleted_at is not null g from public.locations where name = 'Spare Room'"))[0]?.g === true);
+  await until("spare room gone on tech phone", async () => !(await store(J.page)).locations.some((x) => x.name === "Spare Room"));
+  ok("8c. facility inventory: Delete Room refused for a room with equipment (count shown); MCC-2 moved with Move to Room; MCC Room archived (approved report unchanged); empty room deleted; both phones and database agree");
 
   // ---------------------------------------------------------------- 9. admin disables technician
   await A.page.goto(BASE + "/technicians");

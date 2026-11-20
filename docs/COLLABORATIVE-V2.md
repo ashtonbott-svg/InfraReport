@@ -12,6 +12,7 @@ This branch (`collaborative-v2`) adds shared cloud inspections. Production (`mai
 4. New query. Paste `supabase/migrations/20261118000300_event_received_at.sql`, press **Run**.
 5. New query. Paste `supabase/migrations/20261118000400_approval_lock.sql`, press **Run** (see Migration 4 below).
 6. New query. Paste `supabase/migrations/20261119000500_field_test_improvements.sql`, press **Run** (verification queries in `docs/PRODUCTION-RELEASE.md`, Step 1).
+7. Migration 6 (`20261121000600_room_moves.sql`, room archive and room guards): apply with `scripts/supabase-migrate.sh`, not by hand.
 
 Run them once each, in that order. Running the first file a second time fails on purpose (the tables already exist) and changes nothing.
 

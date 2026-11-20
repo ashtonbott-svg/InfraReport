@@ -48,19 +48,27 @@ export const resultHasFinding = (r: Pick<InspectionResult, "images">) => r.image
 
 export type ResultStatus = "todo" | "recorded" | "not-scanned" | "deferred";
 
+export const isLimitedAccess = (opened: string | undefined) => !!opened && LIMITED_ACCESS_OPENED.includes(opened);
+
+export type StatusInput = Pick<InspectionResult, "images" | "exception"> & { opened?: string };
+
 /**
- * Only real work counts: an image entry with an image number, or an
- * explicitly documented exception. The default Opened value never does.
+ * Only real work counts:
+ * 1. an image entry with an image number: scanned (also through a closed cover,
+ *    dead front or accessible surface, whatever Opened says), validated normally;
+ * 2. an explicit exception (Not Scanned / Deferred);
+ * 3. a documented limitation in Opened (can't open, locked out, off, obstructed)
+ *    with no image number: not scanned.
+ * Anything else is still to do. The default Opened value never counts.
  */
-export function resultStatus(r: Pick<InspectionResult, "images" | "exception">): ResultStatus {
+export function resultStatus(r: StatusInput): ResultStatus {
   if (r.images.some(imageHasNumber)) return "recorded";
   if (r.exception) return r.exception.kind;
+  if (isLimitedAccess(r.opened)) return "not-scanned";
   return "todo";
 }
 
-export const isAddressed = (r: Pick<InspectionResult, "images" | "exception">) => resultStatus(r) !== "todo";
-
-export const isLimitedAccess = (opened: string) => LIMITED_ACCESS_OPENED.includes(opened);
+export const isAddressed = (r: StatusInput) => resultStatus(r) !== "todo";
 
 export interface RoomProgress<T> {
   total: number;
@@ -68,7 +76,7 @@ export interface RoomProgress<T> {
   remaining: T[];
 }
 
-export function roomProgress<T extends Pick<InspectionResult, "images" | "exception">>(results: T[]): RoomProgress<T> {
+export function roomProgress<T extends StatusInput>(results: T[]): RoomProgress<T> {
   const remaining = results.filter((r) => !isAddressed(r));
   return { total: results.length, done: results.length - remaining.length, remaining };
 }
@@ -107,7 +115,7 @@ export interface RoomCheck {
 }
 
 /** Finishing a room needs humidity, confirmed conditions and every item addressed. */
-export function checkRoom(room: InspectionRoomConditions | undefined, results: Pick<InspectionResult, "images" | "exception">[]): RoomCheck {
+export function checkRoom(room: InspectionRoomConditions | undefined, results: StatusInput[]): RoomCheck {
   const c = conditionStatus(room);
   const remaining = roomProgress(results).remaining.length;
   return { canFinish: !c.humidityMissing && !c.copiedFrom && remaining === 0, humidityMissing: c.humidityMissing, needsConditionConfirm: !!c.copiedFrom, remaining };

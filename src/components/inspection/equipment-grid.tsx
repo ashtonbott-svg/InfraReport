@@ -2,7 +2,7 @@
 
 import { Fragment, useRef, useState, type KeyboardEvent } from "react";
 import { useDraft } from "@/lib/use-draft";
-import { ChevronDown, ChevronRight, Copy, CornerDownLeft, Plus, Trash2, Undo2, X } from "lucide-react";
+import { ArrowRightLeft, ChevronDown, ChevronRight, Copy, CornerDownLeft, Plus, Trash2, Undo2, X } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Field, Input, Select, Textarea } from "@/components/ui/field";
 import { cn } from "@/lib/cn";
@@ -13,7 +13,8 @@ import { defaultComponentForType, incrementName, inferTypeFromName, resolveEffec
 import { IMAGE_COMPONENTS, imageHasFinding, nextComponent, resultStatus } from "@/lib/domain/thermal";
 import { locationLabel } from "@/lib/domain/csv";
 import type { Equipment, Inspection, InspectionResult, InspectionRoomConditions, Location, ResultOverrides } from "@/lib/domain/types";
-import { useStore } from "@/lib/store/store";
+import { isInspectionLocked, useStore } from "@/lib/store/store";
+import { MoveToRoomSheet } from "@/components/field/move-room-sheet";
 import { toast } from "@/components/ui/toast";
 
 /* ------------------------------------------------------------------ */
@@ -263,7 +264,7 @@ function RowDetails({ row, inspection, locations }: { row: GridRow; inspection: 
   const room = row.room;
   const [review, setReview] = useDraft(r.reviewNotes);
   const [conf, setConf] = useDraft(r.confidence);
-  const facilityLocations = locations.filter((l) => l.facilityId === inspection.facilityId);
+  const [moving, setMoving] = useState(false);
   const eff = resolveEffective(r, room, inspection);
 
   return (
@@ -286,14 +287,11 @@ function RowDetails({ row, inspection, locations }: { row: GridRow; inspection: 
             </Select>
           </Field>
           <Field label="Room" htmlFor={`rm-${r.id}`}>
-            <Select id={`rm-${r.id}`} value={r.locationId} onChange={(e) => {
-              const loc = e.target.value;
-              useStore.getState().addRoomToInspection(inspection.id, loc);
-              updateResult(r.id, { locationId: loc });
-              if (row.equipment) updateEquipment(row.equipment.id, { locationId: loc });
-            }}>
-              {facilityLocations.map((l) => <option key={l.id} value={l.id}>{locationLabel(l)}</option>)}
-            </Select>
+            <div className="flex items-center gap-2">
+              <span id={`rm-${r.id}`} className="min-w-0 flex-1 truncate text-sm text-slate-800">{locationLabel(locations.find((l) => l.id === r.locationId))}</span>
+              {row.equipment ? <Button size="sm" disabled={isInspectionLocked(inspection)} onClick={() => setMoving(true)}><ArrowRightLeft className="h-3.5 w-3.5" />Move to Room</Button> : null}
+            </div>
+            {row.equipment && moving ? <MoveToRoomSheet open onClose={() => setMoving(false)} equipmentId={row.equipment.id} /> : null}
           </Field>
         </div>
         <p className="mt-3 text-xs text-slate-500">

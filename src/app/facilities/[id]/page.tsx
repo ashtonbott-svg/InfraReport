@@ -3,7 +3,7 @@
 import Link from "next/link";
 import { useParams } from "next/navigation";
 import { useMemo, useState } from "react";
-import { FileUp, MapPin, Pencil, Plus, Trash2 } from "lucide-react";
+import { ArchiveRestore, ArrowRightLeft, FileUp, MapPin, Pencil, Plus, Trash2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Card, CardBody, CardHeader } from "@/components/ui/card";
 import { Badge, StatusBadge } from "@/components/ui/badge";
@@ -13,7 +13,9 @@ import { Modal } from "@/components/ui/modal";
 import { FacilityFormModal, LocationFormModal } from "@/components/forms/entity-forms";
 import { toast } from "@/components/ui/toast";
 import { useCustomers, useEquipment, useFacilities, useInspections, useLocations, useResults } from "@/lib/store/hooks";
-import { useStore } from "@/lib/store/store";
+import { isInspectionLocked, useStore } from "@/lib/store/store";
+import { MoveToRoomSheet } from "@/components/field/move-room-sheet";
+import { planRoomRemoval, type RoomRemoval } from "@/lib/domain/room-moves";
 import { EQUIPMENT_PRESETS, OTHER_EQUIPMENT_TYPE } from "@/lib/domain/constants";
 import { defaultComponentForType, inferTypeFromName } from "@/lib/domain/rules";
 import { formatDate } from "@/lib/format";
@@ -28,9 +30,23 @@ export default function FacilityDetailPage() {
   const allEquipment = useEquipment();
   const results = useResults();
   const inspections = useInspections().filter((i) => i.facilityId === id).sort((a, b) => b.date.localeCompare(a.date));
-  const locations = useMemo(() => allLocations.filter((l) => l.facilityId === id).sort((a, b) => a.sortOrder - b.sortOrder), [allLocations, id]);
+  const locations = useMemo(() => allLocations.filter((l) => l.facilityId === id && !l.archivedAt).sort((a, b) => a.sortOrder - b.sortOrder), [allLocations, id]);
+  const archivedRooms = useMemo(() => allLocations.filter((l) => l.facilityId === id && l.archivedAt).sort((a, b) => a.sortOrder - b.sortOrder), [allLocations, id]);
   const equipment = useMemo(() => allEquipment.filter((e) => e.facilityId === id).sort((a, b) => a.sortOrder - b.sortOrder), [allEquipment, id]);
-  const { deleteLocation, updateEquipment, createEquipment } = useStore();
+  const { removeRoom, restoreRoom, updateEquipment, createEquipment } = useStore();
+  const [moveId, setMoveId] = useState<string | null>(null);
+  const [removal, setRemoval] = useState<{ location: Location; plan: RoomRemoval } | null>(null);
+  const askRemove = (l: Location) => {
+    const st = useStore.getState();
+    setRemoval({ location: l, plan: planRoomRemoval({ ...st, isLocked: isInspectionLocked }, l.id) });
+  };
+  const confirmRemove = () => {
+    if (!removal) return;
+    const done = removeRoom(removal.location.id);
+    if (done.kind === "blocked") { setRemoval({ ...removal, plan: done }); return; }
+    toast(done.kind === "archive" ? `${locationLabel(removal.location)} archived` : `${locationLabel(removal.location)} deleted`);
+    setRemoval(null);
+  };
 
   const [editFac, setEditFac] = useState(false);
   const [locModal, setLocModal] = useState<{ open: boolean; location?: Location }>({ open: false });
@@ -61,7 +77,7 @@ export default function FacilityDetailPage() {
           <Link href={`/inspections/new?customer=${facility.customerId}&facility=${facility.id}`}><Button variant="primary"><Plus className="h-4 w-4" />New Inspection</Button></Link>
         </>} />
 
-      <div className="grid gap-6 xl:grid-cols-[1fr_340px]">
+      <div className="grid grid-cols-[minmax(0,1fr)] gap-6 xl:grid-cols-[minmax(0,1fr)_340px]">
         <Card>
           <CardHeader title="Rooms & equipment inventory" description="Permanent records. New inspections can carry this list forward automatically."
             actions={<>
@@ -82,12 +98,12 @@ export default function FacilityDetailPage() {
                       <div className="flex gap-1">
                         <Button size="sm" variant="ghost" onClick={() => openAddEq(l.id)}><Plus className="h-3.5 w-3.5" />Equipment</Button>
                         <Button size="icon" variant="ghost" aria-label="Edit room" onClick={() => setLocModal({ open: true, location: l })}><Pencil className="h-3.5 w-3.5" /></Button>
-                        <Button size="icon" variant="ghost" aria-label="Delete room" onClick={() => { if (!deleteLocation(l.id)) toast("Room has equipment or inspection history and cannot be deleted", "error"); else toast("Room deleted"); }}><Trash2 className="h-3.5 w-3.5" /></Button>
+                        <Button size="sm" variant="ghost" aria-label="Delete room" data-testid="delete-room" onClick={() => askRemove(l)}><Trash2 className="h-3.5 w-3.5" />Delete Room</Button>
                       </div>
                     </div>
                     {items.length === 0 ? <p className="text-xs text-slate-400">No equipment.</p> : (
                       <Table className="rounded-md border border-slate-100">
-                        <thead><tr><th className={th}>Equipment</th><th className={th}>Type</th><th className={th}>Default component</th><th className={th}>Inspected</th><th className={th}>Status</th></tr></thead>
+                        <thead><tr><th className={th}>Equipment</th><th className={th}>Type</th><th className={th}>Default component</th><th className={th}>Inspected</th><th className={th}>Status</th><th className={th}>Room</th></tr></thead>
                         <tbody>
                           {items.map((e) => (
                             <tr key={e.id}>
@@ -100,6 +116,9 @@ export default function FacilityDetailPage() {
                                   {e.active ? <Badge tone="green">Active</Badge> : <Badge>Retired</Badge>}
                                 </button>
                               </td>
+                              <td className="border-b border-slate-100 px-1 py-1 text-right">
+                                <Button size="sm" variant="ghost" onClick={() => setMoveId(e.id)} data-testid="inventory-move"><ArrowRightLeft className="h-3.5 w-3.5" />Move to Room</Button>
+                              </td>
                             </tr>
                           ))}
                         </tbody>
@@ -110,6 +129,20 @@ export default function FacilityDetailPage() {
               })}
             </div>
           )}
+          {archivedRooms.length ? (
+            <div className="border-t border-slate-100 px-5 py-4" data-testid="archived-rooms">
+              <h3 className="text-xs font-semibold uppercase tracking-wide text-slate-500">Archived rooms</h3>
+              <p className="mb-2 text-xs text-slate-500">Not in the active inventory or new inspections. Approved reports that used them still show them.</p>
+              <ul className="space-y-1">
+                {archivedRooms.map((l) => (
+                  <li key={l.id} className="flex items-center justify-between gap-2 text-sm text-slate-600">
+                    <span>{locationLabel(l)}</span>
+                    <Button size="sm" variant="ghost" onClick={() => { restoreRoom(l.id); toast(`${locationLabel(l)} restored`); }}><ArchiveRestore className="h-3.5 w-3.5" />Restore</Button>
+                  </li>
+                ))}
+              </ul>
+            </div>
+          ) : null}
         </Card>
 
         <div className="space-y-6">
@@ -138,6 +171,19 @@ export default function FacilityDetailPage() {
         </div>
       </div>
 
+      {moveId ? <MoveToRoomSheet open onClose={() => setMoveId(null)} equipmentId={moveId} /> : null}
+      <Modal open={!!removal} onClose={() => setRemoval(null)} title={removal ? `Delete ${locationLabel(removal.location)}?` : "Delete room"}
+        footer={removal?.plan.kind === "blocked"
+          ? <Button variant="primary" onClick={() => setRemoval(null)}>OK</Button>
+          : <><Button onClick={() => setRemoval(null)}>Cancel</Button><Button variant="danger" onClick={confirmRemove} data-testid="confirm-delete-room">{removal?.plan.kind === "archive" ? "Archive Room" : "Delete Room"}</Button></>}>
+        {removal ? (
+          <div className="space-y-2 text-sm text-slate-700" data-testid="delete-room-dialog">
+            {removal.plan.kind === "blocked" ? <p className="font-medium text-amber-900">{removal.plan.reason}</p> : null}
+            {removal.plan.kind === "delete" ? <p>The room has no equipment and no inspection uses it. It will be removed on every device.</p> : null}
+            {removal.plan.kind === "archive" ? <p>{removal.plan.historicalInspectionCount === 1 ? "An approved report uses" : `${removal.plan.historicalInspectionCount} approved reports use`} this room, so it will be archived instead of deleted: it leaves the active inventory and new inspections, and those reports keep it. You can restore it later.</p> : null}
+          </div>
+        ) : null}
+      </Modal>
       <FacilityFormModal open={editFac} onClose={() => setEditFac(false)} facility={facility} />
       <LocationFormModal open={locModal.open} onClose={() => setLocModal({ open: false })} facilityId={facility.id} location={locModal.location} />
       <Modal open={eqModal.open} onClose={() => setEqModal({ open: false, locationId: "" })} title="Add equipment to inventory"

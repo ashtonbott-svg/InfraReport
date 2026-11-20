@@ -45,7 +45,7 @@ export default function FacilitiesPage() {
                   <td className={td}><Link href={`/facilities/${f.id}`} className="font-medium text-slate-900 hover:text-heat-700">{f.name}</Link></td>
                   <td className={td}><Link href={`/customers/${f.customerId}`} className="hover:underline">{customer}</Link></td>
                   <td className={`${td} text-xs`}>{[f.city, f.state].filter(Boolean).join(", ")}</td>
-                  <td className={`${td} tabular-nums`}>{locations.filter((l) => l.facilityId === f.id).length}</td>
+                  <td className={`${td} tabular-nums`}>{locations.filter((l) => l.facilityId === f.id && !l.archivedAt).length}</td>
                   <td className={`${td} tabular-nums`}>{equipment.filter((e) => e.facilityId === f.id).length}</td>
                 </tr>
               ))}
