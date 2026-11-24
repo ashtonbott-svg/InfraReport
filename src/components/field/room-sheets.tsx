@@ -3,6 +3,9 @@
 import { useState, type FormEvent } from "react";
 import { Check, ChevronRight, Copy, Plus, Trash2 } from "lucide-react";
 import { RoomMenu } from "@/components/field/room-menu";
+
+/** "1 room", "3 rooms", "6 equipment items": rooms and equipment are never shown as a bare number. */
+export const countLabel = (n: number, noun: string) => `${n} ${noun}${n === 1 ? "" : "s"}`;
 import { Button } from "@/components/ui/button";
 import { Sheet } from "@/components/ui/sheet";
 import { cn } from "@/lib/cn";
@@ -156,7 +159,7 @@ export function RoomPickerSheet({ open, onClose, rooms, selected, onSelect, onAd
 }) {
   const hasMenu = !!(onRenameRoom || onDeleteRoom);
   return (
-    <Sheet open={open} onClose={onClose} title="Switch Room" subtitle={`${rooms.length} rooms in this inspection`}
+    <Sheet open={open} onClose={onClose} title="Switch Room" subtitle={`${countLabel(rooms.length, "room")} · ${countLabel(total, "equipment item")}`}
       footer={<Button variant="primary" size="lg" className="h-12 w-full justify-center text-base" onClick={onAddRoom}><Plus className="h-5 w-5" />Add Room</Button>}>
       <ul className="-mx-2 space-y-1">
         {rooms.map((r) => (
@@ -167,7 +170,7 @@ export function RoomPickerSheet({ open, onClose, rooms, selected, onSelect, onAd
                 <span className="block truncate text-base font-medium text-slate-900">{locationLabel(r.location)}</span>
                 <span className="block truncate text-xs text-slate-500">{conditionSummary(r.room)}</span>
               </span>
-              <span className="rounded-full bg-slate-100 px-2 py-0.5 text-xs font-semibold tabular-nums text-slate-600">{r.count}</span>
+              <span className="shrink-0 rounded-full bg-slate-100 px-2 py-0.5 text-xs font-semibold tabular-nums text-slate-600" data-testid="room-item-count">{countLabel(r.count, "item")}</span>
               {hasMenu ? null : <ChevronRight className="h-4 w-4 text-slate-300" />}
             </button>
             <RoomMenu label={locationLabel(r.location)} onRename={onRenameRoom && (() => onRenameRoom(r.location.id))} onDelete={onDeleteRoom && (() => onDeleteRoom(r.location.id))} />
@@ -175,7 +178,7 @@ export function RoomPickerSheet({ open, onClose, rooms, selected, onSelect, onAd
         ))}
         <li>
           <button onClick={() => onSelect("all")} className={cn("flex min-h-12 w-full items-center gap-3 rounded-xl px-3 text-left text-sm", selected === "all" ? "bg-slate-900 text-white" : "text-slate-600 hover:bg-slate-50")}>
-            <span className="flex-1 font-medium">All rooms</span><span className="tabular-nums">{total}</span>
+            <span className="flex-1 font-medium">All rooms</span><span className="tabular-nums" data-testid="all-rooms-count">{countLabel(total, "item")}</span>
           </button>
         </li>
       </ul>

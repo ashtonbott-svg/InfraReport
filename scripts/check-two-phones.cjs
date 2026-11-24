@@ -258,8 +258,8 @@ const LEGACY = {
   await J.page.locator("#ed-1-notes").fill("RC 6, A Phase, Class 2");
   await shot(J.page, "05c-two-views");
   await J.page.keyboard.press("Escape");
-  const p1a = (await store(J.page)).results.find((r) => r.id === jp1.id);
-  if (JSON.stringify(p1a.images.map((i) => [i.component, i.irImageNumber])) !== JSON.stringify([["Top Half", "101"], ["Bottom Half", "105"]])) throw new Error("views: " + JSON.stringify(p1a.images));
+  // Inputs save after a short pause: wait for the saved values instead of reading them instantly.
+  await until("two views saved on the phone", async () => JSON.stringify((await store(J.page)).results.find((r) => r.id === jp1.id).images.map((i) => [i.component, i.irImageNumber])) === JSON.stringify([["Top Half", "101"], ["Bottom Half", "105"]]), 10000);
   if ((await store(J.page)).equipment.filter((e) => e.name.startsWith("Panel P1")).length !== 1) throw new Error("rename created a duplicate");
   await until("rename and views reach the admin phone", async () => { const r = await resultByName(A.page, "Panel P1A"); return r && r.images.length === 2 && r.images[1].notes === "RC 6, A Phase, Class 2"; });
   ok("5b. renamed Panel P1 -> Panel P1A with the pencil (same record, IR 101 kept); Top & Bottom gave two views of ONE item; note typed on the Bottom Half view; all synced");
@@ -365,7 +365,7 @@ const LEGACY = {
   await until("name restored on the technician", async () => (await store(J.page)).locations.some((l) => l.name === "MCC Room") && !(await store(J.page)).locations.some((l) => l.name === "MCC Room East"));
   // Narrower desktop: the ⋯ button beside the room dropdown offers the same menu.
   await A.page.setViewportSize({ width: 1280, height: 800 });
-  await A.page.getByRole("combobox", { name: "Select room" }).selectOption({ label: "MCC Room (1)" });
+  await A.page.getByRole("combobox", { name: "Select room" }).selectOption({ label: "MCC Room (1 item)" });
   await A.page.getByTestId("room-menu").filter({ visible: true }).first().click();
   await A.page.getByTestId("room-menu-delete").filter({ visible: true }).waitFor();
   await A.page.keyboard.press("Escape");
