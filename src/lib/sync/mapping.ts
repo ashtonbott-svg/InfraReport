@@ -40,7 +40,7 @@ export function customerRow(c: Customer): Row {
   return { id: c.id, organization_id: c.organizationId, name: c.name, contact_name: c.contactName, contact_email: c.contactEmail, contact_phone: c.contactPhone, notes: c.notes };
 }
 export function facilityRow(f: Facility): Row {
-  return { id: f.id, organization_id: f.organizationId, customer_id: f.customerId, name: f.name, address: f.address, city: f.city, state: f.state, postal_code: f.postalCode, notes: f.notes };
+  return { id: f.id, organization_id: f.organizationId, customer_id: f.customerId, name: f.name, address: f.address, city: f.city, state: f.state, postal_code: f.postalCode, notes: f.notes, archived_at: f.archivedAt ?? null };
 }
 export function locationRow(l: Location): Row {
   return { id: l.id, organization_id: l.organizationId, facility_id: l.facilityId, building: l.building, name: l.name, area: l.area, sort_order: l.sortOrder, archived_at: l.archivedAt ?? null };
@@ -103,7 +103,7 @@ export function toCustomer(r: Row): Customer {
   return { id: S(r.id), organizationId: S(r.organization_id), name: S(r.name), contactName: S(r.contact_name), contactEmail: S(r.contact_email), contactPhone: S(r.contact_phone), notes: S(r.notes), createdAt: S(r.created_at) };
 }
 export function toFacility(r: Row): Facility {
-  return { id: S(r.id), organizationId: S(r.organization_id), customerId: S(r.customer_id), name: S(r.name), address: S(r.address), city: S(r.city), state: S(r.state), postalCode: S(r.postal_code), notes: S(r.notes), createdAt: S(r.created_at) };
+  return { id: S(r.id), organizationId: S(r.organization_id), customerId: S(r.customer_id), name: S(r.name), address: S(r.address), city: S(r.city), state: S(r.state), postalCode: S(r.postal_code), notes: S(r.notes), createdAt: S(r.created_at), archivedAt: (r.archived_at as string | null | undefined) ?? null };
 }
 export function toLocation(r: Row): Location {
   return { id: S(r.id), organizationId: S(r.organization_id), facilityId: S(r.facility_id), building: S(r.building), name: S(r.name), area: S(r.area), sortOrder: num(r.sort_order), archivedAt: (r.archived_at as string | null | undefined) ?? null };
@@ -156,10 +156,15 @@ export const NATURAL_KEYS: Partial<Record<TableName, string[]>> = {
   results: ["inspection_id", "equipment_id"],
 };
 
+/** JSON with object keys sorted, so the same object in a different key order compares equal. */
+function stable(v: unknown): string {
+  return JSON.stringify(v, (_k, x) => (x && typeof x === "object" && !Array.isArray(x) ? Object.fromEntries(Object.keys(x).sort().map((k) => [k, (x as Record<string, unknown>)[k]])) : x));
+}
+
 export function sameValue(a: unknown, b: unknown): boolean {
   if (a === b) return true;
   if ((a === null || a === undefined || a === "") && (b === null || b === undefined || b === "")) return true;
-  if (typeof a === "object" || typeof b === "object") return JSON.stringify(a ?? null) === JSON.stringify(b ?? null);
+  if (typeof a === "object" || typeof b === "object") return stable(a ?? null) === stable(b ?? null);
   if (typeof a === "number" || typeof b === "number") return Number(a) === Number(b);
   return String(a) === String(b);
 }

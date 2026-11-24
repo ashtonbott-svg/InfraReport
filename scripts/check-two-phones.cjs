@@ -597,6 +597,50 @@ const LEGACY = {
   await until("spare room gone on tech phone", async () => !(await store(J.page)).locations.some((x) => x.name === "Spare Room"));
   ok("8c. facility inventory: room used by the approved report is archived with MCC-2 retired, not deleted (approved report unchanged); empty room deleted; both phones and database agree");
 
+  // ---------------------------------------------------------------- 8d. delete, undo, archive, restore a facility (administrator, phone)
+  const facName = (await store(A.page)).facilities.find((f) => f.id === facId).name;
+  const techHasJob = async () => (await store(J.page)).inspections.some((i) => i.id === inspId);
+  await A.page.goto(BASE + "/facilities");
+  await A.page.getByRole("button", { name: `Delete ${facName}` }).filter({ visible: true }).click();
+  const dlg = A.page.getByTestId("delete-records-dialog");
+  await dlg.getByText("1 approved report").waitFor();
+  await dlg.getByText(/Also delete 1 inspection with/).waitFor();
+  await shot(A.page, "11-delete-facility");
+  const offscreen = await A.page.getByTestId("delete-records-footer").locator("button").evaluateAll((bs) => bs.filter((b) => { const r = b.getBoundingClientRect(); return r.left < 0 || r.right > innerWidth; }).map((b) => b.textContent));
+  if (offscreen.length) throw new Error("dialog buttons off screen: " + offscreen.join(", "));
+  if (await A.page.getByTestId("confirm-delete-records").isEnabled()) throw new Error("facility delete offered without confirmation");
+  await A.page.getByTestId("delete-ack").check();
+  if (await A.page.getByTestId("confirm-delete-records").isEnabled()) throw new Error("approved history deleted without typing the name");
+  await A.page.getByTestId("delete-typed").fill(facName);
+  await A.page.getByTestId("confirm-delete-records").click();
+  await until("facility deleted in database", async () => (await sql("select deleted_at is not null d from public.facilities where id = $1", [facId]))[0].d === true);
+  await until("job gone from the technician's phone", async () => !(await techHasJob()));
+  await A.page.getByTestId("toast-action").click();
+  await until("Undo restored the facility in the database", async () => (await sql("select deleted_at is null d from public.facilities where id = $1", [facId]))[0].d === true);
+  await until("job back on the technician's phone", techHasJob);
+  ok("8d. Facilities page: Delete Facility listed the approved report, needed the checkbox and the typed name, removed it everywhere; Undo brought it back on both phones");
+  await A.page.goto(BASE + "/facilities");
+  await A.page.getByRole("button", { name: `Delete ${facName}` }).filter({ visible: true }).click();
+  await A.page.getByTestId("archive-facility").click();
+  await until("archived in database", async () => (await sql("select archived_at is not null a from public.facilities where id = $1", [facId]))[0].a === true);
+  await A.page.getByTestId("show-archived").check();
+  await A.page.getByRole("link", { name: facName }).click();
+  await A.page.getByTestId("unarchive-facility").click();
+  await until("unarchived", async () => (await sql("select archived_at is null a from public.facilities where id = $1", [facId]))[0].a === true);
+  ok("8d2. Archive Instead kept everything (facility hidden until Show archived); Restore from Archive brought it back");
+  await A.page.getByTestId("delete-facility-header").click();
+  await A.page.getByTestId("delete-ack").check();
+  await A.page.getByTestId("delete-typed").fill(facName);
+  await A.page.getByTestId("confirm-delete-records").click();
+  await A.page.waitForURL(/\/facilities$/);
+  await until("deleted again", async () => !(await techHasJob()));
+  await A.page.goto(BASE + "/deleted");
+  await A.page.getByTestId("deleted-row").filter({ hasText: facName }).first().getByTestId("restore-deletion").click();
+  await until("restored from Recently Deleted", async () => (await sql("select count(*)::int n from public.results where inspection_id = $1 and deleted_at is null", [inspId]))[0].n > 0);
+  await until("job back on the technician's phone again", techHasJob);
+  await shot(A.page, "12-recently-deleted");
+  ok("8d3. Delete Facility from the facility page; Recently Deleted listed it and Restore brought back the facility, inspection and readings on both phones");
+
   // ---------------------------------------------------------------- 9. admin disables technician
   await A.page.goto(BASE + "/technicians");
   await A.page.getByRole("button", { name: "Disable" }).click();
