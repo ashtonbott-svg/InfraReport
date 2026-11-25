@@ -140,4 +140,4 @@ grant all on public.inspection_reports, public.report_versions to service_role;
 
 revoke all on function public.tg_photo_verification(), public.tg_report_version_rules(), public.photo_path_inspection(text) from anon, public;
 grant execute on function public.photo_path_inspection(text) to authenticated;
-grant execute on all functions in schema public to service_role;
+grant execute on function public.tg_photo_verification(), public.tg_report_version_rules(), public.photo_path_inspection(text) to service_role;

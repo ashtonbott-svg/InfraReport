@@ -18,6 +18,7 @@ and that is what decides whether a file has been applied:
 | `20261121000600_room_moves.sql` | 20261120211248 | applied with `scripts/supabase-migrate.sh` (2026-11-20) |
 | `20261121000700_room_delete_uninspected.sql` | 20261120222013 | applied with `scripts/supabase-migrate.sh` (2026-11-20) |
 | `20261124000800_customer_facility_deletion.sql` | 20261124172235 | applied with `scripts/supabase-migrate.sh` (2026-11-24) |
+| `20261125000900_photos_and_reports.sql` | 20261125230436 | applied with `scripts/supabase-migrate.sh` (2026-11-25, approved for report preview testing; additive only) |
 
 Rules:
 
