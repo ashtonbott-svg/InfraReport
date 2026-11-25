@@ -170,6 +170,37 @@ run("Room moves and room deletion (real Supabase, two phones)", () => {
     expect(line(ashton, "OFF-1")).toMatchObject({ locationId: roomA });
   });
 
+  it("the last room of an inspection can be deleted with its uninspected items; the job, customer and other phone stay consistent", async () => {
+    const job = ashton.s.createInspection({ customerId: custId, facilityId: facId, date: "2026-12-01", inspectorIds: [ashton.userId, justice.userId], carryForward: false });
+    const only = ashton.s.createRoomForInspection(job, { building: "", name: "Only Room", area: "" }, { humidity: "55", ambientTemp: "55", backgroundTemp: "55" });
+    for (const nm of ["IMP-1", "IMP-2", "IMP-3"]) ashton.s.addResult(job, only, { name: nm, equipmentType: "Panel" });
+    await ashton.sync(); await justice.sync();
+    expect(justice.s.rooms.filter((r) => r.inspectionId === job)).toHaveLength(1);
+    const { plan, undo } = justice.s.removeRoom(only);
+    expect(plan).toMatchObject({ kind: "delete", deleteEquipment: expect.arrayContaining([expect.objectContaining({ name: "IMP-1" })]) });
+    await justice.sync(); await ashton.sync();
+    expect(Object.values(justice.engine.data.ops).filter((o) => o.failed)).toEqual([]);
+    for (const p of [ashton, justice]) {
+      expect(p.s.rooms.filter((r) => r.inspectionId === job)).toHaveLength(0);
+      expect(p.s.results.filter((r) => r.inspectionId === job)).toHaveLength(0);
+      expect(p.s.inspections.some((i) => i.id === job)).toBe(true);
+    }
+    const db = (await sql(`select (select count(*)::int from public.inspections where id = $1 and deleted_at is null) insp,
+      (select count(*)::int from public.customers where id = $2 and deleted_at is null) cust,
+      (select count(*)::int from public.room_conditions where inspection_id = $1 and deleted_at is null) rooms,
+      (select count(*)::int from public.results where inspection_id = $1 and deleted_at is null) lines,
+      (select count(*)::int from public.locations where id = $3 and deleted_at is null) loc`, [job, custId, only]))[0];
+    expect(db).toEqual({ insp: 1, cust: 1, rooms: 0, lines: 0, loc: 0 });
+    // Undo after sync brings it back everywhere; a stale reload does not resurrect it after the second delete.
+    justice.s.undoRoomRemoval(undo!);
+    await justice.sync(); await ashton.sync();
+    expect(ashton.s.results.filter((r) => r.inspectionId === job)).toHaveLength(3);
+    justice.s.removeRoom(only);
+    await justice.sync(); ashton.boot(); await ashton.sync();
+    expect(ashton.s.rooms.filter((r) => r.inspectionId === job)).toHaveLength(0);
+    expect(justice.engine.data.conflicts).toEqual([]);
+  });
+
   it("7. partially inspected room: only the inspected item is protected; the database refuses unsafe deletes too", async () => {
     const p3 = line(justice, "P3");
     justice.s.updateThermalImage(p3.id, p3.images[0].id, { irImageNumber: "0301" });

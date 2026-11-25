@@ -12,7 +12,7 @@ import { InspectionHeader } from "@/components/inspection/inspection-header";
 import { ApprovalBanner } from "@/components/inspection/approval";
 import { RoomConditionsCard, RoomRail, type RoomEntry } from "@/components/inspection/room-panels";
 import { EquipmentGrid, QuickAddBar, type GridRow } from "@/components/inspection/equipment-grid";
-import { AddRoomSheet, RoomConditionsSheet, RoomPickerSheet, conditionSummary } from "@/components/field/room-sheets";
+import { AddRoomSheet, RenameRoomSheet, RoomConditionsSheet, RoomPickerSheet, conditionSummary } from "@/components/field/room-sheets";
 import { DeleteRoomSheet } from "@/components/field/delete-room-sheet";
 import { EquipmentSheet, nameSuggestions } from "@/components/field/equipment-sheet";
 import { ReorderSheet } from "@/components/field/reorder-sheet";
@@ -151,7 +151,8 @@ function EntryWorkspace() {
   const [q, setQ] = useState("");
   const [filter, setFilter] = useState<RowFilter>("all");
   const [showFilters, setShowFilters] = useState(false);
-  const [sheet, setSheet] = useState<null | "add-room" | "pick-room" | "conditions" | "delete-room" | "add-eq" | "edit-eq" | "checkpoint" | "reorder">(null);
+  const [roomAction, setRoomAction] = useState<string | null>(null);
+  const [sheet, setSheet] = useState<null | "add-room" | "pick-room" | "conditions" | "delete-room" | "rename-room" | "add-eq" | "edit-eq" | "checkpoint" | "reorder">(null);
   const [insertAfter, setInsertAfter] = useState<string | null>(null);
   const [editId, setEditId] = useState<string | null>(null);
 
@@ -297,10 +298,13 @@ function EntryWorkspace() {
         facilityRooms={locations.filter((l) => l.facilityId === inspection.facilityId && !l.archivedAt).map((l) => ({ id: l.id, name: l.name, building: l.building, inInspection: usedLocationIds.has(l.id) }))}
         onUseExisting={(locId) => { addExistingRoom(locId); toast("Existing room added. Enter its conditions."); }} />
       <RoomPickerSheet open={sheet === "pick-room"} onClose={() => setSheet(null)} rooms={rooms} selected={selected} total={dataset.results.length}
-        onSelect={(l) => { selectRoom(l); setSheet(null); }} onAddRoom={() => setSheet("add-room")} otherRooms={otherRooms} onAddExisting={addExistingRoom} />
+        onSelect={(l) => { selectRoom(l); setSheet(null); }} onAddRoom={() => setSheet("add-room")} otherRooms={otherRooms} onAddExisting={addExistingRoom}
+        onRenameRoom={isInspectionLocked(inspection) ? undefined : (l) => { setRoomAction(l); setSheet("rename-room"); }}
+        onDeleteRoom={isInspectionLocked(inspection) ? undefined : (l) => { setRoomAction(l); setSheet("delete-room"); }} />
+      <RenameRoomSheet open={sheet === "rename-room"} onClose={() => setSheet(null)} location={locations.find((l) => l.id === roomAction) ?? null} knownBuildings={field.knownBuildings} />
       <RoomConditionsSheet open={sheet === "conditions"} onClose={() => setSheet(null)} info={current} inspectionDate={inspection.date} knownBuildings={field.knownBuildings}
-        onDeleteRoom={isInspectionLocked(inspection) ? undefined : () => setSheet("delete-room")} />
-      {sheet === "delete-room" && current ? <DeleteRoomSheet open onClose={() => setSheet(null)} locationId={current.location.id} /> : null}
+        onDeleteRoom={isInspectionLocked(inspection) ? undefined : () => { setRoomAction(current?.location.id ?? null); setSheet("delete-room"); }} />
+      {sheet === "delete-room" && roomAction ? <DeleteRoomSheet open onClose={() => setSheet(null)} locationId={roomAction} /> : null}
       {sheet === "add-eq" || sheet === "edit-eq" ? (
         <EquipmentSheet open mode={sheet === "add-eq" ? "create" : "edit"} onClose={() => { setSheet(null); setInsertAfter(null); }} inspection={inspection}
           afterResultId={sheet === "add-eq" ? insertAfter : null}
@@ -455,7 +459,9 @@ function EntryWorkspace() {
       <InspectionHeader inspection={inspection} errorCount={counts.error} />
       <div className="mb-4 space-y-3">{startBanner}{reminder}</div>
       <div className="grid gap-4 2xl:grid-cols-[240px_minmax(0,1fr)]">
-        <RoomRail rooms={rooms} selected={selected} onSelect={selectRoom} onAdd={() => setSheet("add-room")} total={dataset.results.length} />
+        <RoomRail rooms={rooms} selected={selected} onSelect={selectRoom} onAdd={() => setSheet("add-room")} total={dataset.results.length}
+          onRenameRoom={isInspectionLocked(inspection) ? undefined : (l) => { setRoomAction(l); setSheet("rename-room"); }}
+          onDeleteRoom={isInspectionLocked(inspection) ? undefined : (l) => { setRoomAction(l); setSheet("delete-room"); }} />
         <div className="min-w-0 space-y-4">
           {rooms.length === 0 ? (
             <Card><EmptyState icon={<ListPlus className="h-5 w-5" />} title="Add the first room" description="Create a room, enter humidity and temperatures once, then add equipment rapidly." action={<Button variant="primary" onClick={() => setSheet("add-room")}>Add room</Button>} /></Card>

@@ -2,7 +2,8 @@
 
 import Link from "next/link";
 import { useMemo, useState } from "react";
-import { Plus, Search, Trash2, Users } from "lucide-react";
+import { History, Plus, Search, Trash2, Users } from "lucide-react";
+import { useRole } from "@/lib/cloud/role";
 import { DeleteCustomerDialog } from "@/components/forms/delete-customer-dialog";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
@@ -19,6 +20,7 @@ export default function CustomersPage() {
   const [q, setQ] = useState("");
   const [open, setOpen] = useState(false);
   const [deleting, setDeleting] = useState<string | null>(null);
+  const { cloud, isAdmin } = useRole();
 
   const rows = useMemo(() => {
     const s = q.trim().toLowerCase();
@@ -30,7 +32,10 @@ export default function CustomersPage() {
   return (
     <>
       <PageHeader title="Customers" description="Companies you inspect for. Each customer can have multiple facilities."
-        actions={<Button variant="primary" onClick={() => setOpen(true)}><Plus className="h-4 w-4" />New Customer</Button>} />
+        actions={<>
+          {cloud && isAdmin ? <Link href="/deleted"><Button><History className="h-4 w-4" />Recently Deleted</Button></Link> : null}
+          <Button variant="primary" onClick={() => setOpen(true)}><Plus className="h-4 w-4" />New Customer</Button>
+        </>} />
       <Card>
         <div className="border-b border-slate-100 p-3">
           <div className="relative max-w-sm">

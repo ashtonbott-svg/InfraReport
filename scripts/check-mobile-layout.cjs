@@ -76,13 +76,13 @@ async function overflow(page) {
   await p.goto(BASE + "/customers");
   await p.getByRole("button", { name: "Delete Top Golf Cranston RI" }).filter({ visible: true }).click();
   await p.getByText("Delete Customer?").waitFor();
-  await p.getByText("Are you sure you want to delete").waitFor();
+  await p.getByTestId("delete-records-dialog").waitFor();
   const counts = await p.locator("[data-testid=delete-counts]").innerText();
   if (!/1\s*facility/.test(counts) || !/10\s*equipment records/.test(counts) || !/1\s*inspection\b/.test(counts)) throw new Error("counts wrong: " + counts);
-  if (await p.getByTestId("confirm-delete-customer").isEnabled()) throw new Error("delete must need explicit acknowledgement");
+  if (await p.getByTestId("confirm-delete-records").isEnabled()) throw new Error("delete must need explicit acknowledgement");
   if (OUT) await p.screenshot({ path: `${OUT}/delete-dialog.png` });
-  await p.getByTestId("ack-delete").check();
-  await p.getByTestId("confirm-delete-customer").click();
+  await p.getByTestId("delete-ack").check();
+  await p.getByTestId("confirm-delete-records").click();
   await p.getByText("Top Golf Cranston RI deleted").waitFor();
   const names = await p.locator("ul.divide-y li a span.block.truncate").allInnerTexts();
   if (JSON.stringify(names) !== JSON.stringify(["Top Golf Canton, Massachusetts"])) throw new Error("customers after delete: " + names);

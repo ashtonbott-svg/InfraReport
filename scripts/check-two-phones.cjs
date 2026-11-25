@@ -258,8 +258,8 @@ const LEGACY = {
   await J.page.locator("#ed-1-notes").fill("RC 6, A Phase, Class 2");
   await shot(J.page, "05c-two-views");
   await J.page.keyboard.press("Escape");
-  const p1a = (await store(J.page)).results.find((r) => r.id === jp1.id);
-  if (JSON.stringify(p1a.images.map((i) => [i.component, i.irImageNumber])) !== JSON.stringify([["Top Half", "101"], ["Bottom Half", "105"]])) throw new Error("views: " + JSON.stringify(p1a.images));
+  // Inputs save after a short pause: wait for the saved values instead of reading them instantly.
+  await until("two views saved on the phone", async () => JSON.stringify((await store(J.page)).results.find((r) => r.id === jp1.id).images.map((i) => [i.component, i.irImageNumber])) === JSON.stringify([["Top Half", "101"], ["Bottom Half", "105"]]), 10000);
   if ((await store(J.page)).equipment.filter((e) => e.name.startsWith("Panel P1")).length !== 1) throw new Error("rename created a duplicate");
   await until("rename and views reach the admin phone", async () => { const r = await resultByName(A.page, "Panel P1A"); return r && r.images.length === 2 && r.images[1].notes === "RC 6, A Phase, Class 2"; });
   ok("5b. renamed Panel P1 -> Panel P1A with the pencil (same record, IR 101 kept); Top & Bottom gave two views of ONE item; note typed on the Bottom Half view; all synced");
@@ -301,47 +301,77 @@ const LEGACY = {
   if ((await sql("select count(*)::int n from public.equipment where deleted_at is null"))[0].n !== eqBefore) throw new Error("move duplicated equipment");
   ok("5d. Move to Room: technician moved MCC-1 (IR 201) into a new Switchgear Room; same record, readings kept, no duplicate; synced to the admin phone and the database");
 
-  // Technician deletes a room of uninspected equipment in Field Mode, undoes it, then deletes it for good.
+  // Technician deletes a room of uninspected equipment from the Rooms list menu, undoes it, then deletes it for good.
   await addRoomAndEquipment(J.page, "Temp Room", [["TMP-1", ""], ["TMP-2", ""]]);
   const tmpIds = async (p) => (await store(p)).equipment.filter((e) => e.name.startsWith("TMP-")).map((e) => e.id);
   await until("temp items on admin phone", async () => (await tmpIds(A.page)).length === 2);
-  const deleteTempRoom = async () => {
-    await J.page.getByTestId("room-conditions-edit").click();
-    await J.page.getByTestId("field-delete-room").click();
-    await J.page.getByTestId("delete-room-summary").getByText("This room contains 2 uninspected equipment items. Delete the room and all 2 items?").waitFor();
-    await J.page.getByTestId("confirm-delete-room").click();
+  const openRoomMenu = async (p, room) => {
+    await p.getByRole("button", { name: "Switch room" }).filter({ visible: true }).first().click();
+    await p.getByTestId("room-row").filter({ hasText: room }).getByTestId("room-menu").click();
   };
-  await deleteTempRoom();
+  await openRoomMenu(J.page, "Temp Room");
+  await shot(J.page, "05e-room-menu");
+  await J.page.getByTestId("room-menu-delete").click();
+  await J.page.getByTestId("delete-room-summary").getByText("This room contains 2 uninspected equipment items. Delete the room and all 2 items?").waitFor();
+  await J.page.getByTestId("confirm-delete-room").click();
+  await until("temp room gone from the Rooms list", async () => !(await store(J.page)).locations.some((l) => l.name === "Temp Room"));
   await shot(J.page, "05f-room-deleted-undo");
   await J.page.getByTestId("toast-action").click();
   await until("undo restored the items on the technician phone", async () => (await tmpIds(J.page)).length === 2);
   await until("restored items on admin phone", async () => (await tmpIds(A.page)).length === 2);
   const tmpRoomId = (await store(J.page)).locations.find((l) => l.name === "Temp Room").id;
   await J.page.goto(BASE + `/inspections/${inspId}/entry?room=${tmpRoomId}`);
-  // An item with a reading in the same room is protected: named, and moved from the dialog.
-  await J.page.getByRole("button", { name: "Add Equipment" }).filter({ visible: true }).first().click();
-  await J.page.locator("#eq-name-input").fill("TMP-3");
-  await J.page.locator("#new-0-ir").fill("301");
-  await J.page.getByRole("button", { name: "Save", exact: true }).click();
-  await J.page.locator("button[data-result-id]").filter({ hasText: "TMP-3" }).first().waitFor();
-  await J.page.getByTestId("room-conditions-edit").click();
-  await J.page.getByTestId("field-delete-room").click();
-  await J.page.getByTestId("delete-room-dialog").getByText(/must be moved to another room before the room is deleted: TMP-3/).waitFor();
-  await J.page.getByTestId("protected-items").getByText("IR 301").waitFor();
-  if (await J.page.getByTestId("confirm-delete-room").isEnabled()) throw new Error("delete offered while TMP-3 has a reading");
+  // Two items with readings in the same room are protected: named, and moved together from the dialog.
+  for (const [nm, ir] of [["TMP-3", "301"], ["TMP-4", "302"]]) {
+    await J.page.getByRole("button", { name: "Add Equipment" }).filter({ visible: true }).first().click();
+    await J.page.locator("#eq-name-input").fill(nm);
+    await J.page.locator("#new-0-ir").fill(ir);
+    await J.page.getByRole("button", { name: "Save", exact: true }).click();
+    await J.page.locator("button[data-result-id]").filter({ hasText: nm }).first().waitFor();
+  }
+  await openRoomMenu(J.page, "Temp Room");
+  await J.page.getByTestId("room-menu-delete").click();
+  await J.page.getByTestId("delete-room-dialog").getByText(/must be moved to another room before the room is deleted: TMP-3, TMP-4/).waitFor();
+  await J.page.getByTestId("protected-items").getByText("IR 302").waitFor();
+  if (await J.page.getByTestId("confirm-delete-room").isEnabled()) throw new Error("delete offered while TMP-3/4 have readings");
   await shot(J.page, "05g-protected");
-  await J.page.getByTestId("protected-move").click();
-  await J.page.getByRole("radio", { name: /Electrical Room/ }).click();
-  if (await J.page.getByTestId("move-conditions").count()) await J.page.getByTestId("move-keep-conditions").click();
-  await J.page.getByTestId("move-confirm").click();
+  await J.page.getByTestId("move-all-dest").selectOption({ label: "Electrical Room" });
+  await J.page.getByTestId("move-all-confirm").click();
   await J.page.getByTestId("delete-room-summary").getByText("This room contains 2 uninspected equipment items. Delete the room and all 2 items?").waitFor();
   await J.page.getByTestId("confirm-delete-room").click();
   const tmpLeft = async (p) => (await store(p)).equipment.filter((e) => e.name.startsWith("TMP-")).map((e) => e.name).sort().join(",");
-  await until("temp room gone on admin phone, TMP-3 kept", async () => (await tmpLeft(A.page)) === "TMP-3" && !(await store(A.page)).locations.some((l) => l.name === "Temp Room"));
-  await until("TMP-1/2 soft deleted in database, TMP-3 kept with IR 301", async () => (await sql("select count(*)::int n from public.equipment where name in ('TMP-1','TMP-2') and deleted_at is not null"))[0].n === 2
-    && (await sql("select t.ir_image_number ir, l.name room from public.equipment e join public.results r on r.equipment_id = e.id and r.deleted_at is null join public.thermal_images t on t.result_id = r.id and t.deleted_at is null join public.locations l on l.id = r.location_id where e.name = 'TMP-3' and e.deleted_at is null"))[0]?.ir === "301");
+  await until("temp room gone on admin phone, TMP-3/4 kept", async () => (await tmpLeft(A.page)) === "TMP-3,TMP-4" && !(await store(A.page)).locations.some((l) => l.name === "Temp Room"));
+  const kept = async () => (await sql("select e.name, t.ir_image_number ir, l.name room from public.equipment e join public.results r on r.equipment_id = e.id and r.deleted_at is null join public.thermal_images t on t.result_id = r.id and t.deleted_at is null join public.locations l on l.id = r.location_id where e.name in ('TMP-3','TMP-4') and e.deleted_at is null order by e.name")).map((x) => `${x.name}|${x.ir}|${x.room}`).join(",");
+  await until("TMP-1/2 soft deleted in database, TMP-3/4 kept with readings in Electrical Room", async () => (await sql("select count(*)::int n from public.equipment where name in ('TMP-1','TMP-2') and deleted_at is not null"))[0].n === 2
+    && (await kept()) === "TMP-3|301|Electrical Room,TMP-4|302|Electrical Room");
   if ((await resultByName(J.page, "MCC-1")).images[0].irImageNumber !== "201") throw new Error("other rooms changed");
-  ok("5e. Field Mode: technician deleted Temp Room with its 2 uninspected items in one confirmation; Undo brought them back on both phones; TMP-3 (IR 301) was named, moved from the dialog and kept; then room + 2 items deleted (soft) everywhere");
+  ok("5e. Rooms list menu (iPhone): Temp Room deleted with its 2 uninspected items in one confirmation; Undo brought them back on both phones; TMP-3 and TMP-4 (readings) named, moved together with Move all, kept; then room + 2 items deleted (soft) everywhere");
+
+  // Administrator on a wide desktop renames a room from the Rooms sidebar menu; the technician's phone follows.
+  const railMenu = (room) => A.page.getByTestId("room-row").filter({ visible: true, hasText: room }).getByTestId("room-menu").click();
+  await A.page.setViewportSize({ width: 1700, height: 950 });
+  await A.page.goto(BASE + `/inspections/${inspId}/entry`);
+  await railMenu("MCC Room").catch(async (e) => { await A.page.screenshot({ path: (OUT || "/tmp") + "/fail-5e2.png" }); throw e; });
+  await shot(A.page, "05h-room-menu-desktop");
+  await A.page.getByTestId("room-menu-rename").click();
+  await A.page.locator("#rename-room-name").fill("MCC Room East");
+  await A.page.getByTestId("rename-room-save").click();
+  await until("rename reaches the technician", async () => (await store(J.page)).locations.some((l) => l.name === "MCC Room East"));
+  await A.page.getByTestId("room-row").filter({ visible: true, hasText: "MCC Room East" }).waitFor();
+  await railMenu("MCC Room East");
+  await A.page.getByTestId("room-menu-rename").click();
+  await A.page.locator("#rename-room-name").fill("MCC Room");
+  await A.page.getByTestId("rename-room-save").click();
+  await until("name restored on the technician", async () => (await store(J.page)).locations.some((l) => l.name === "MCC Room") && !(await store(J.page)).locations.some((l) => l.name === "MCC Room East"));
+  // Narrower desktop: the ⋯ button beside the room dropdown offers the same menu.
+  await A.page.setViewportSize({ width: 1280, height: 800 });
+  await A.page.getByRole("combobox", { name: "Select room" }).selectOption({ label: "MCC Room (1 item)" });
+  await A.page.getByTestId("room-menu").filter({ visible: true }).first().click();
+  await A.page.getByTestId("room-menu-delete").filter({ visible: true }).waitFor();
+  await A.page.keyboard.press("Escape");
+  await A.page.mouse.click(5, 5);
+  await A.page.setViewportSize(devices["iPhone 13"].viewport);
+  ok("5e2. Rooms sidebar menu (desktop): administrator renamed MCC Room and back; the technician's phone followed; the ⋯ menu is also beside the room dropdown on narrower screens");
 
   // ---------------------------------------------------------------- 6. cloud unreachable, refresh, reconnect
   await J.ctx.route(/127\.0\.0\.1:54321/, (r) => r.abort("internetdisconnected"));
@@ -443,7 +473,7 @@ const LEGACY = {
   await shot(A.page, "08b-format-choice");
   const [dl1] = await Promise.all([A.page.waitForEvent("download"), A.page.getByTestId("card-download-xlsx-infinite").click()]);
   const rows1 = await readWorkbook(dl1);
-  const expected = ["Electrical Room|Panel P1A|105", "Electrical Room|Panel P1A|111", "Electrical Room|TMP-3|301", "Generator Room|Panel P2|102", "MCC Room|MCC-2|202", "Switchgear Room|MCC-1|201"];
+  const expected = ["Electrical Room|Panel P1A|105", "Electrical Room|Panel P1A|111", "Electrical Room|TMP-3|301", "Electrical Room|TMP-4|302", "Generator Room|Panel P2|102", "MCC Room|MCC-2|202", "Switchgear Room|MCC-1|201"];
   if (JSON.stringify(rows1) !== JSON.stringify(expected)) throw new Error("export before approval: " + JSON.stringify(rows1));
   const o = rows1.ordered;
   if (!(o.indexOf("MCC Room|MCC-2|202") < o.indexOf("Switchgear Room|MCC-1|201")) || !(o.indexOf("Electrical Room|Panel P1A|111") < o.indexOf("Electrical Room|Panel P1A|105"))) throw new Error("export order: " + JSON.stringify(o));
@@ -566,6 +596,50 @@ const LEGACY = {
   await until("spare room deleted in database", async () => (await sql("select deleted_at is not null g from public.locations where name = 'Spare Room'"))[0]?.g === true);
   await until("spare room gone on tech phone", async () => !(await store(J.page)).locations.some((x) => x.name === "Spare Room"));
   ok("8c. facility inventory: room used by the approved report is archived with MCC-2 retired, not deleted (approved report unchanged); empty room deleted; both phones and database agree");
+
+  // ---------------------------------------------------------------- 8d. delete, undo, archive, restore a facility (administrator, phone)
+  const facName = (await store(A.page)).facilities.find((f) => f.id === facId).name;
+  const techHasJob = async () => (await store(J.page)).inspections.some((i) => i.id === inspId);
+  await A.page.goto(BASE + "/facilities");
+  await A.page.getByRole("button", { name: `Delete ${facName}` }).filter({ visible: true }).click();
+  const dlg = A.page.getByTestId("delete-records-dialog");
+  await dlg.getByText("1 approved report").waitFor();
+  await dlg.getByText(/Also delete 1 inspection with/).waitFor();
+  await shot(A.page, "11-delete-facility");
+  const offscreen = await A.page.getByTestId("delete-records-footer").locator("button").evaluateAll((bs) => bs.filter((b) => { const r = b.getBoundingClientRect(); return r.left < 0 || r.right > innerWidth; }).map((b) => b.textContent));
+  if (offscreen.length) throw new Error("dialog buttons off screen: " + offscreen.join(", "));
+  if (await A.page.getByTestId("confirm-delete-records").isEnabled()) throw new Error("facility delete offered without confirmation");
+  await A.page.getByTestId("delete-ack").check();
+  if (await A.page.getByTestId("confirm-delete-records").isEnabled()) throw new Error("approved history deleted without typing the name");
+  await A.page.getByTestId("delete-typed").fill(facName);
+  await A.page.getByTestId("confirm-delete-records").click();
+  await until("facility deleted in database", async () => (await sql("select deleted_at is not null d from public.facilities where id = $1", [facId]))[0].d === true);
+  await until("job gone from the technician's phone", async () => !(await techHasJob()));
+  await A.page.getByTestId("toast-action").click();
+  await until("Undo restored the facility in the database", async () => (await sql("select deleted_at is null d from public.facilities where id = $1", [facId]))[0].d === true);
+  await until("job back on the technician's phone", techHasJob);
+  ok("8d. Facilities page: Delete Facility listed the approved report, needed the checkbox and the typed name, removed it everywhere; Undo brought it back on both phones");
+  await A.page.goto(BASE + "/facilities");
+  await A.page.getByRole("button", { name: `Delete ${facName}` }).filter({ visible: true }).click();
+  await A.page.getByTestId("archive-facility").click();
+  await until("archived in database", async () => (await sql("select archived_at is not null a from public.facilities where id = $1", [facId]))[0].a === true);
+  await A.page.getByTestId("show-archived").check();
+  await A.page.getByRole("link", { name: facName }).click();
+  await A.page.getByTestId("unarchive-facility").click();
+  await until("unarchived", async () => (await sql("select archived_at is null a from public.facilities where id = $1", [facId]))[0].a === true);
+  ok("8d2. Archive Instead kept everything (facility hidden until Show archived); Restore from Archive brought it back");
+  await A.page.getByTestId("delete-facility-header").click();
+  await A.page.getByTestId("delete-ack").check();
+  await A.page.getByTestId("delete-typed").fill(facName);
+  await A.page.getByTestId("confirm-delete-records").click();
+  await A.page.waitForURL(/\/facilities$/);
+  await until("deleted again", async () => !(await techHasJob()));
+  await A.page.goto(BASE + "/deleted");
+  await A.page.getByTestId("deleted-row").filter({ hasText: facName }).first().getByTestId("restore-deletion").click();
+  await until("restored from Recently Deleted", async () => (await sql("select count(*)::int n from public.results where inspection_id = $1 and deleted_at is null", [inspId]))[0].n > 0);
+  await until("job back on the technician's phone again", techHasJob);
+  await shot(A.page, "12-recently-deleted");
+  ok("8d3. Delete Facility from the facility page; Recently Deleted listed it and Restore brought back the facility, inspection and readings on both phones");
 
   // ---------------------------------------------------------------- 9. admin disables technician
   await A.page.goto(BASE + "/technicians");

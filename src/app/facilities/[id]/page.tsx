@@ -1,9 +1,11 @@
 "use client";
 
 import Link from "next/link";
-import { useParams } from "next/navigation";
+import { useParams, useRouter } from "next/navigation";
 import { useMemo, useState } from "react";
-import { ArchiveRestore, ArrowRightLeft, FileUp, MapPin, Pencil, Plus, Trash2 } from "lucide-react";
+import { Archive, ArchiveRestore, ArrowRightLeft, FileUp, MapPin, Pencil, Plus, Trash2 } from "lucide-react";
+import { DeleteRecordsDialog } from "@/components/forms/delete-records-dialog";
+import { useRole } from "@/lib/cloud/role";
 import { Button } from "@/components/ui/button";
 import { Card, CardBody, CardHeader } from "@/components/ui/card";
 import { Badge, StatusBadge } from "@/components/ui/badge";
@@ -38,6 +40,10 @@ export default function FacilityDetailPage() {
   const [removing, setRemoving] = useState<string | null>(null);
 
   const [editFac, setEditFac] = useState(false);
+  const [deletingFac, setDeletingFac] = useState(false);
+  const router = useRouter();
+  const { isAdmin } = useRole();
+  const updateFacility = useStore((st) => st.updateFacility);
   const [locModal, setLocModal] = useState<{ open: boolean; location?: Location }>({ open: false });
   const [eqModal, setEqModal] = useState<{ open: boolean; locationId: string }>({ open: false, locationId: "" });
   const [eqForm, setEqForm] = useState({ name: "", type: "Panel", component: "Full Panel" });
@@ -58,10 +64,14 @@ export default function FacilityDetailPage() {
     <>
       <PageHeader
         eyebrow={<><Link href="/facilities" className="hover:underline">Facilities</Link> / <Link href={`/customers/${customer?.id}`} className="hover:underline">{customer?.name}</Link></>}
-        title={facility.name}
+        title={facility.archivedAt ? `${facility.name} (Archived)` : facility.name}
         description={<span className="inline-flex items-center gap-1"><MapPin className="h-3.5 w-3.5" />{[facility.address, facility.city, facility.state, facility.postalCode].filter(Boolean).join(", ") || "No address"}</span>}
         actions={<>
           <Button onClick={() => setEditFac(true)}><Pencil className="h-4 w-4" />Edit</Button>
+          {isAdmin ? (facility.archivedAt
+            ? <Button onClick={() => { updateFacility(facility.id, { archivedAt: null }); toast(`${facility.name} restored`); }} data-testid="unarchive-facility"><ArchiveRestore className="h-4 w-4" />Restore from Archive</Button>
+            : <Button onClick={() => { updateFacility(facility.id, { archivedAt: new Date().toISOString() }); toast(`${facility.name} archived`, "success", { label: "Undo", onClick: () => updateFacility(facility.id, { archivedAt: null }) }); }} data-testid="archive-facility-header"><Archive className="h-4 w-4" />Archive</Button>) : null}
+          {isAdmin ? <Button variant="danger" onClick={() => setDeletingFac(true)} data-testid="delete-facility-header"><Trash2 className="h-4 w-4" />Delete Facility</Button> : null}
           <Link href={`/facilities/${facility.id}/import`}><Button><FileUp className="h-4 w-4" />Import Equipment List</Button></Link>
           <Link href={`/inspections/new?customer=${facility.customerId}&facility=${facility.id}`}><Button variant="primary"><Plus className="h-4 w-4" />New Inspection</Button></Link>
         </>} />
@@ -162,6 +172,7 @@ export default function FacilityDetailPage() {
 
       {moveId ? <MoveToRoomSheet open onClose={() => setMoveId(null)} equipmentId={moveId} /> : null}
       {removing ? <DeleteRoomSheet open onClose={() => setRemoving(null)} locationId={removing} /> : null}
+      <DeleteRecordsDialog kind="facility" id={facility.id} open={deletingFac} onClose={() => setDeletingFac(false)} onDeleted={() => router.push("/facilities")} />
       <FacilityFormModal open={editFac} onClose={() => setEditFac(false)} facility={facility} />
       <LocationFormModal open={locModal.open} onClose={() => setLocModal({ open: false })} facilityId={facility.id} location={locModal.location} />
       <Modal open={eqModal.open} onClose={() => setEqModal({ open: false, locationId: "" })} title="Add equipment to inventory"

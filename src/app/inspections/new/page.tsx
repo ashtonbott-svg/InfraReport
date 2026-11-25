@@ -43,7 +43,7 @@ function NewInspectionForm() {
   const [newCust, setNewCust] = useState(false);
   const [newFac, setNewFac] = useState(false);
 
-  const custFacilities = useMemo(() => facilities.filter((f) => f.customerId === customerId), [facilities, customerId]);
+  const custFacilities = useMemo(() => facilities.filter((f) => f.customerId === customerId && !f.archivedAt), [facilities, customerId]);
   // A facility must belong to the chosen customer; auto-pick when there is only one.
   const facilityId = custFacilities.some((f) => f.id === facilityChoice) ? facilityChoice : custFacilities.length === 1 ? custFacilities[0].id : "";
 

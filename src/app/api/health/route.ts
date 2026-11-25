@@ -13,6 +13,7 @@ export async function GET() {
   let secretKeyError: string | null = null;
   let migration5: boolean | null = null;
   let migration6: boolean | null = null;
+  let migration8: boolean | null = null;
   if (!cfg.problems.length) {
     try {
       const admin = createClient(cfg.values.url, cfg.values.secret, { auth: { persistSession: false, autoRefreshToken: false } });
@@ -32,6 +33,8 @@ export async function GET() {
         migration5 = !a.error && !b.error && !c.error;
         // Migration 6: rooms can be archived.
         migration6 = !(await admin.from("locations").select("archived_at", { head: true })).error;
+        // Migration 8: customer and facility deletion with recovery.
+        migration8 = !(await admin.from("deletion_batches").select("id", { head: true })).error && !(await admin.from("facilities").select("archived_at", { head: true })).error;
       }
     } catch (e) {
       secretKeyAccepted = false;
@@ -40,9 +43,10 @@ export async function GET() {
   }
   return NextResponse.json({
     ...cfg.present,
-    ready: cfg.problems.length === 0 && secretKeyAccepted === true && migration5 === true && migration6 === true,
+    ready: cfg.problems.length === 0 && secretKeyAccepted === true && migration5 === true && migration6 === true && migration8 === true,
     migration5,
     migration6,
+    migration8,
     problems: cfg.problems,
     secretKeyAccepted,
     secretKeyError,

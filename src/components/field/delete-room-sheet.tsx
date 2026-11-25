@@ -9,7 +9,7 @@ import { MoveToRoomSheet } from "@/components/field/move-room-sheet";
 import { conditionSummary } from "@/components/field/room-sheets";
 import { isInspectionLocked, useStore } from "@/lib/store/store";
 import { locationLabel } from "@/lib/domain/csv";
-import { planRoomRemoval, removalSummary } from "@/lib/domain/room-moves";
+import { activeRooms, planRoomRemoval, removalSummary } from "@/lib/domain/room-moves";
 
 /**
  * Delete a room (facility inventory and Field Mode). Uninspected equipment goes with it in one
@@ -63,6 +63,7 @@ export function DeleteRoomSheet({ open, onClose, locationId, onDeleted }: {
                   </li>
                 ))}
               </ul>
+              <MoveAllProtected fromLocationId={locationId} facilityId={location.facilityId} equipmentIds={plan.protectedItems.map((p) => p.equipment.id)} />
               {uninspected ? <p className="text-slate-600">After that, the room and its {uninspected} uninspected item{uninspected === 1 ? "" : "s"} can be deleted together.</p> : null}
             </>
           ) : (
@@ -95,3 +96,47 @@ function planUninspectedCount(s: ReturnType<typeof useStore.getState>, locationI
   const history = new Set(s.results.filter((r) => isInspectionLocked(s.inspections.find((i) => i.id === r.inspectionId))).map((r) => r.equipmentId));
   return s.equipment.filter((e) => e.locationId === locationId && !keep.has(e.id) && !history.has(e.id)).length;
 }
+
+const NEW_ROOM = "__new__";
+const selectCls = "h-12 w-full rounded-lg border border-slate-300 bg-white px-3 text-base text-slate-900";
+
+/**
+ * Move every protected item to one room in a single step (existing room or a new one). Readings keep
+ * the conditions they were measured under, so their exports do not change.
+ */
+function MoveAllProtected({ fromLocationId, facilityId, equipmentIds }: { fromLocationId: string; facilityId: string; equipmentIds: string[] }) {
+  const s = useStore();
+  const rooms = activeRooms(s.locations, facilityId).filter((l) => l.id !== fromLocationId);
+  const [dest, setDest] = useState(rooms[0]?.id ?? NEW_ROOM);
+  const [name, setName] = useState("");
+  const n = equipmentIds.length;
+  const duplicate = dest === NEW_ROOM && name.trim() ? activeRooms(s.locations, facilityId).find((l) => l.name.trim().toLowerCase() === name.trim().toLowerCase() && !l.building.trim()) : undefined;
+  const ready = dest === NEW_ROOM ? !!name.trim() && !duplicate : rooms.some((l) => l.id === dest);
+  const moveAll = () => {
+    if (!ready) return;
+    const st = useStore.getState();
+    const to = dest === NEW_ROOM ? st.createLocation({ facilityId, building: "", name: name.trim(), area: "" }) : dest;
+    let moved = 0;
+    for (const id of equipmentIds) if (useStore.getState().moveEquipmentToRoom(id, to, { keepRecordedConditions: true })) moved++;
+    const label = locationLabel(useStore.getState().locations.find((l) => l.id === to));
+    toast(`Moved ${moved} item${moved === 1 ? "" : "s"} to ${label}`);
+  };
+  return (
+    <div className="space-y-2 rounded-lg border border-slate-200 p-3" data-testid="move-all">
+      <div className="font-semibold text-slate-900">Move {n === 1 ? "this item" : `all ${n} items`} to</div>
+      <select aria-label="Destination room" className={selectCls} value={dest} onChange={(e) => setDest(e.target.value)} data-testid="move-all-dest">
+        {rooms.map((l) => <option key={l.id} value={l.id}>{locationLabel(l)}</option>)}
+        <option value={NEW_ROOM}>New room…</option>
+      </select>
+      {dest === NEW_ROOM ? (
+        <input aria-label="New room name" placeholder="New room name" autoComplete="off" autoCapitalize="words" className={selectCls} value={name} onChange={(e) => setName(e.target.value)} data-testid="move-all-new-name" />
+      ) : null}
+      {duplicate ? <p className="text-xs text-amber-900">{locationLabel(duplicate)} already exists. Choose it from the list.</p> : null}
+      <p className="text-xs text-slate-500">Readings keep the room conditions they were measured under.</p>
+      <Button size="lg" className="h-12 w-full justify-center" disabled={!ready} onClick={moveAll} data-testid="move-all-confirm">
+        <ArrowRightLeft className="h-4 w-4" />Move {n === 1 ? "Item" : `${n} Items`}
+      </Button>
+    </div>
+  );
+}
+

@@ -348,7 +348,8 @@ export class SyncEngine {
       return "ok";
     }
     if (depth > 0 && got.row.version === op.baseVersion) return this.fail(op, "other", "Update was not accepted");
-    this.rebase(op.key, got.row, "known");
+    // "Keep my version" of a record deleted elsewhere: the person chose theirs to win, field by field.
+    this.rebase(op.key, got.row, op.row.__restore ? "server-is-base" : "known");
     return this.pushAgain(op.key, depth + 1);
   }
 
@@ -512,7 +513,9 @@ export class SyncEngine {
         const version = (row.version as number | undefined) ?? 0;
         if (row.deleted_at) {
           const decided = this.data.conflicts.some((c) => c.key === key);
-          if ((op && op.kind === "upsert") || (!op && this.last.has(key) && keepLocal(t, id, row))) {
+          if (op?.kind === "upsert" && op.row.__restore) {
+            // Already decided ("Keep my version"); the restore is waiting (for example for an administrator's restore).
+          } else if ((op && op.kind === "upsert") || (!op && this.last.has(key) && keepLocal(t, id, row))) {
             if (!decided) newConflicts.push({ key, table: t, recordId: id, field: "__deleted", mine: "Keep my version", theirs: "Deleted on another device", theirsVersion: version, theirsBy: (row.updated_by as string) ?? null });
           } else if (decided) {
             // A decision is waiting on the Sync page: keep the local record until it is made.

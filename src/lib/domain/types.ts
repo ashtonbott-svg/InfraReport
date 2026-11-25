@@ -72,6 +72,8 @@ export interface Facility {
   postalCode: string;
   notes: string;
   createdAt: ISODateTime;
+  /** Archived: kept with its history, hidden from new work. */
+  archivedAt?: string | null;
 }
 
 /** A permanent room / electrical area inside a facility. */

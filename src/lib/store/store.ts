@@ -135,6 +135,8 @@ export interface Actions {
    * customers are never touched.
    */
   deleteCustomer(id: ID): CustomerDeletion | null;
+  /** Device-only records: delete a facility and everything under it (cloud records use admin_delete_records). */
+  deleteFacility(id: ID): CustomerDeletion | null;
   createFacility(input: Omit<Facility, "id" | "organizationId" | "createdAt">): ID;
   updateFacility(id: ID, patch: Partial<Facility>): void;
   createLocation(input: Omit<Location, "id" | "organizationId" | "sortOrder">): ID;
@@ -269,6 +271,27 @@ export const storeInitializer: StateCreator<Store> = (set, get) => {
       };
       const lockedResult = (resultId: ID) => lockedInsp(get().results.find((r) => r.id === resultId)?.inspectionId);
       const lockedRoom = (roomId: ID) => lockedInsp(get().rooms.find((r) => r.id === roomId)?.inspectionId);
+      const removePlanned = (plan: CustomerDeletion, withCustomer: boolean) => {
+        const s = get();
+        const fac = new Set(plan.facilityIds);
+        const insp = new Set(plan.inspectionIds);
+        const photoIds = new Set(plan.photoIds);
+        set({
+          customers: withCustomer ? s.customers.filter((c) => c.id !== plan.customerId) : s.customers,
+          facilities: s.facilities.filter((f) => !fac.has(f.id)),
+          locations: s.locations.filter((l) => !fac.has(l.facilityId)),
+          equipment: s.equipment.filter((e) => !fac.has(e.facilityId)),
+          inspections: s.inspections.filter((i) => !insp.has(i.id)),
+          rooms: s.rooms.filter((r) => !insp.has(r.inspectionId)),
+          results: s.results.filter((r) => !insp.has(r.inspectionId)),
+          photos: s.photos.filter((p) => !photoIds.has(p.id)),
+          images: s.images.filter((i) => !insp.has(i.inspectionId)),
+          documents: s.documents.filter((d) => !d.inspectionId || !insp.has(d.inspectionId)),
+          reviewEvents: s.reviewEvents.filter((e) => !insp.has(e.inspectionId)),
+          exteriorChecks: (s.exteriorChecks ?? []).filter((c) => !insp.has(c.inspectionId)),
+          activeInspectionId: plan.activeInspectionId ? null : s.activeInspectionId,
+        });
+      };
       const nextResultOrder = (inspectionId: ID) =>
         Math.max(0, ...get().results.filter((r) => r.inspectionId === inspectionId).map((r) => r.sortOrder)) + 1;
 
@@ -283,28 +306,18 @@ export const storeInitializer: StateCreator<Store> = (set, get) => {
         updateCustomer(id, patch) {
           set((s) => ({ customers: s.customers.map((c) => (c.id === id && c.organizationId === org() ? { ...c, ...patch, id, organizationId: c.organizationId } : c)) }));
         },
+        deleteFacility(id) {
+          const s = get();
+          const plan = planFacilityDeletion(s, id);
+          if (!plan) return null;
+          removePlanned(plan, false);
+          return plan;
+        },
         deleteCustomer(id) {
           const s = get();
           const plan = planCustomerDeletion(s, id);
           if (!plan) return null;
-          const fac = new Set(plan.facilityIds);
-          const insp = new Set(plan.inspectionIds);
-          const photoIds = new Set(plan.photoIds);
-          set({
-            customers: s.customers.filter((c) => c.id !== id),
-            facilities: s.facilities.filter((f) => !fac.has(f.id)),
-            locations: s.locations.filter((l) => !fac.has(l.facilityId)),
-            equipment: s.equipment.filter((e) => !fac.has(e.facilityId)),
-            inspections: s.inspections.filter((i) => !insp.has(i.id)),
-            rooms: s.rooms.filter((r) => !insp.has(r.inspectionId)),
-            results: s.results.filter((r) => !insp.has(r.inspectionId)),
-            photos: s.photos.filter((p) => !photoIds.has(p.id)),
-            images: s.images.filter((i) => !insp.has(i.inspectionId)),
-            documents: s.documents.filter((d) => !d.inspectionId || !insp.has(d.inspectionId)),
-            reviewEvents: s.reviewEvents.filter((e) => !insp.has(e.inspectionId)),
-            exteriorChecks: (s.exteriorChecks ?? []).filter((c) => !insp.has(c.inspectionId)),
-            activeInspectionId: plan.activeInspectionId ? null : s.activeInspectionId,
-          });
+          removePlanned(plan, true);
           return plan;
         },
 
@@ -1074,6 +1087,26 @@ export interface CustomerDeletion {
   /** Set when one of this customer's inspections is the active site visit. */
   activeInspectionId: ID | null;
   counts: { facilities: number; rooms: number; equipment: number; inspections: number; results: number; photos: number; documents: number };
+}
+
+/** What deleting one facility would remove (same shape; the customer stays). */
+export function planFacilityDeletion(
+  s: Pick<DataState, "customers" | "facilities" | "locations" | "equipment" | "inspections" | "results" | "photos" | "documents" | "activeInspectionId">,
+  facilityId: ID,
+): CustomerDeletion | null {
+  const f = s.facilities.find((x) => x.id === facilityId);
+  if (!f) return null;
+  const insp = new Set(s.inspections.filter((i) => i.facilityId === facilityId).map((i) => i.id));
+  const photoIds = s.photos.filter((p) => insp.has(p.inspectionId) || p.facilityId === facilityId).map((p) => p.id);
+  return {
+    customerId: f.customerId, customerName: f.name, facilityIds: [facilityId], inspectionIds: [...insp], photoIds,
+    activeInspectionId: s.activeInspectionId && insp.has(s.activeInspectionId) ? s.activeInspectionId : null,
+    counts: {
+      facilities: 1, rooms: s.locations.filter((l) => l.facilityId === facilityId).length, equipment: s.equipment.filter((e) => e.facilityId === facilityId).length,
+      inspections: insp.size, results: s.results.filter((r) => insp.has(r.inspectionId)).length, photos: photoIds.length,
+      documents: s.documents.filter((d) => d.inspectionId && insp.has(d.inspectionId)).length,
+    },
+  };
 }
 
 /** What deleting a customer would remove. Pure; used for the confirmation dialog and the delete itself. */

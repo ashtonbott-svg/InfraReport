@@ -2,6 +2,10 @@
 
 import { useState, type FormEvent } from "react";
 import { Check, ChevronRight, Copy, Plus, Trash2 } from "lucide-react";
+import { RoomMenu } from "@/components/field/room-menu";
+
+/** "1 room", "3 rooms", "6 equipment items": rooms and equipment are never shown as a bare number. */
+export const countLabel = (n: number, noun: string) => `${n} ${noun}${n === 1 ? "" : "s"}`;
 import { Button } from "@/components/ui/button";
 import { Sheet } from "@/components/ui/sheet";
 import { cn } from "@/lib/cn";
@@ -146,30 +150,35 @@ export function AddRoomSheet({ open, onClose, inspectionId, previous, knownBuild
 }
 
 /** Room switcher: inspection rooms first, then other facility rooms not yet visited. */
-export function RoomPickerSheet({ open, onClose, rooms, selected, onSelect, onAddRoom, otherRooms, onAddExisting, total }: {
+export function RoomPickerSheet({ open, onClose, rooms, selected, onSelect, onAddRoom, otherRooms, onAddExisting, total, onRenameRoom, onDeleteRoom }: {
   open: boolean; onClose: () => void; rooms: RoomInfo[]; selected: string; onSelect: (id: string) => void; onAddRoom: () => void;
   otherRooms: Location[]; onAddExisting: (locationId: string) => void; total: number;
+  /** Room menu (absent while the inspection is approved and locked). */
+  onRenameRoom?: (locationId: string) => void;
+  onDeleteRoom?: (locationId: string) => void;
 }) {
+  const hasMenu = !!(onRenameRoom || onDeleteRoom);
   return (
-    <Sheet open={open} onClose={onClose} title="Switch Room" subtitle={`${rooms.length} rooms in this inspection`}
+    <Sheet open={open} onClose={onClose} title="Switch Room" subtitle={`${countLabel(rooms.length, "room")} · ${countLabel(total, "equipment item")}`}
       footer={<Button variant="primary" size="lg" className="h-12 w-full justify-center text-base" onClick={onAddRoom}><Plus className="h-5 w-5" />Add Room</Button>}>
       <ul className="-mx-2 space-y-1">
         {rooms.map((r) => (
-          <li key={r.location.id}>
-            <button onClick={() => onSelect(r.location.id)} className={cn("flex min-h-14 w-full items-center gap-3 rounded-xl px-3 py-2 text-left", selected === r.location.id ? "bg-thermal-50 ring-1 ring-thermal-300" : "hover:bg-slate-50 active:bg-slate-100")}>
+          <li key={r.location.id} className="flex items-center gap-1" data-testid="room-row">
+            <button onClick={() => onSelect(r.location.id)} className={cn("flex min-h-14 min-w-0 flex-1 items-center gap-3 rounded-xl px-3 py-2 text-left", selected === r.location.id ? "bg-thermal-50 ring-1 ring-thermal-300" : "hover:bg-slate-50 active:bg-slate-100")}>
               <span className={cn("h-2.5 w-2.5 shrink-0 rounded-full", conditionsComplete(r.room) ? "bg-emerald-500" : "bg-amber-400")} />
               <span className="min-w-0 flex-1">
                 <span className="block truncate text-base font-medium text-slate-900">{locationLabel(r.location)}</span>
                 <span className="block truncate text-xs text-slate-500">{conditionSummary(r.room)}</span>
               </span>
-              <span className="rounded-full bg-slate-100 px-2 py-0.5 text-xs font-semibold tabular-nums text-slate-600">{r.count}</span>
-              <ChevronRight className="h-4 w-4 text-slate-300" />
+              <span className="shrink-0 rounded-full bg-slate-100 px-2 py-0.5 text-xs font-semibold tabular-nums text-slate-600" data-testid="room-item-count">{countLabel(r.count, "item")}</span>
+              {hasMenu ? null : <ChevronRight className="h-4 w-4 text-slate-300" />}
             </button>
+            <RoomMenu label={locationLabel(r.location)} onRename={onRenameRoom && (() => onRenameRoom(r.location.id))} onDelete={onDeleteRoom && (() => onDeleteRoom(r.location.id))} />
           </li>
         ))}
         <li>
           <button onClick={() => onSelect("all")} className={cn("flex min-h-12 w-full items-center gap-3 rounded-xl px-3 text-left text-sm", selected === "all" ? "bg-slate-900 text-white" : "text-slate-600 hover:bg-slate-50")}>
-            <span className="flex-1 font-medium">All rooms</span><span className="tabular-nums">{total}</span>
+            <span className="flex-1 font-medium">All rooms</span><span className="tabular-nums" data-testid="all-rooms-count">{countLabel(total, "item")}</span>
           </button>
         </li>
       </ul>
@@ -236,3 +245,37 @@ export function RoomConditionsSheet({ open, onClose, info, inspectionDate, known
     </Sheet>
   );
 }
+
+/** Rename a room (name and building). The room keeps its id, equipment and history. */
+export function RenameRoomSheet({ open, onClose, location, knownBuildings }: {
+  open: boolean; onClose: () => void; location: Location | null; knownBuildings: string[];
+}) {
+  const updateLocation = useStore((s) => s.updateLocation);
+  const [v, setV] = useState({ name: "", building: "" });
+  useOnOpen(open, () => location && setV({ name: location.name, building: location.building }));
+  if (!location) return null;
+  const save = (e?: FormEvent) => {
+    e?.preventDefault();
+    if (!v.name.trim()) return;
+    updateLocation(location.id, { name: v.name.trim(), building: v.building.trim() });
+    onClose();
+  };
+  return (
+    <Sheet open={open} onClose={onClose} title="Rename Room" subtitle={locationLabel(location)}
+      footer={<Button variant="primary" size="lg" className="h-12 w-full justify-center text-base" disabled={!v.name.trim()} onClick={() => save()} data-testid="rename-room-save"><Check className="h-5 w-5" />Save</Button>}>
+      <form onSubmit={save} className="space-y-4">
+        <label htmlFor="rename-room-name" className="block">
+          <span className="mb-1 block text-sm font-medium text-slate-700">Room name</span>
+          <input id="rename-room-name" autoFocus autoComplete="off" autoCapitalize="words" className={bigInput} value={v.name} onChange={(e) => setV({ ...v, name: e.target.value })} />
+        </label>
+        <label htmlFor="rename-room-bldg" className="block">
+          <span className="mb-1 block text-sm font-medium text-slate-700">Building <span className="font-normal text-slate-400">(optional)</span></span>
+          <input id="rename-room-bldg" list="rename-room-buildings" autoComplete="off" className={bigInput} value={v.building} onChange={(e) => setV({ ...v, building: e.target.value })} />
+          <datalist id="rename-room-buildings">{knownBuildings.map((b) => <option key={b} value={b} />)}</datalist>
+        </label>
+        <button type="submit" className="hidden" />
+      </form>
+    </Sheet>
+  );
+}
+
