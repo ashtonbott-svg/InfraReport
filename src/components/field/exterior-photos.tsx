@@ -16,6 +16,8 @@ import { useSession } from "@/lib/cloud/session";
 import { persistPhoto } from "@/lib/photos/capture";
 import { deletePhotoBlob } from "@/lib/photos/photo-db";
 import { usePhotoUrl } from "@/lib/photos/use-photo-url";
+import { CloudPhotoStatus } from "@/components/field/cloud-photo-status";
+import { supabase } from "@/lib/cloud/client";
 import { formatDateTime } from "@/lib/format";
 import type { ExteriorCheck, Photo } from "@/lib/domain/types";
 
@@ -150,9 +152,10 @@ export function ExteriorChecklist({ field, editable = true }: { field: FieldStat
           {field.exterior.map((p) => (
             <div key={p.id} className="space-y-1">
               <Thumb photo={p} className="aspect-[4/3] w-full" />
+              <CloudPhotoStatus photo={p} />
               {editable ? (
                 <div className="flex items-center gap-1">
-                  <select aria-label="Building shown in photo" className="h-8 min-w-0 flex-1 rounded border border-slate-200 bg-white px-1 text-xs" value={p.building} onChange={(e) => setPhotoBuilding(p.id, e.target.value)}>
+                  <select aria-label="Building shown in photo" className="h-8 min-w-0 flex-1 rounded border border-slate-200 bg-white px-1 text-xs" value={p.building} onChange={(e) => { setPhotoBuilding(p.id, e.target.value); if (p.cloudFileId) void supabase()?.from("photo_files").update({ building: e.target.value }).eq("id", p.cloudFileId); }}>
                     {[...new Set([...options, p.building])].map((b) => <option key={b || "main"} value={b}>{buildingLabel(b)}</option>)}
                   </select>
                   <button className="rounded p-1.5 text-slate-400 hover:bg-slate-100 hover:text-red-600" aria-label="Delete photo" onClick={() => remove(p)}><Trash2 className="h-3.5 w-3.5" /></button>

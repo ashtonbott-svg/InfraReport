@@ -4,6 +4,8 @@ import { makeThumbnail, resizeForStorage, savePhotoBlob, storageUsage } from "./
 import { useStore } from "../store/store";
 import { useSaveStatus } from "../store/save-status";
 import type { Photo } from "../domain/types";
+import { DEFAULT_ORG_ID } from "../store/seed";
+import { queuePhotos } from "./cloud-upload";
 
 const uid = () => `photo-${typeof crypto !== "undefined" && "randomUUID" in crypto ? crypto.randomUUID() : Math.random().toString(36).slice(2)}`;
 
@@ -27,8 +29,16 @@ export async function persistPhoto(
     const stored = await resizeForStorage(file);
     const thumb = await makeThumbnail(stored);
     await savePhotoBlob(id, stored, thumb);
+    // Shared inspections: the untouched original also goes to private cloud storage (queued; resumes after a refresh or lost signal).
+    const insp = useStore.getState().inspections.find((i) => i.id === meta.inspectionId);
+    let cloudFileId: string | undefined;
+    if (insp && insp.organizationId !== DEFAULT_ORG_ID) {
+      try {
+        [cloudFileId] = await queuePhotos([file], { organizationId: insp.organizationId, inspectionId: insp.id, facilityId: insp.facilityId, kind: meta.kind, building: meta.building, resultId: meta.resultId });
+      } catch { /* saved on the phone; the cloud copy can be added from the Photographs page */ }
+    }
     useStore.getState().addPhotoRecord({
-      id, ...meta, fileName: file.name || "photo.jpg", mimeType: stored.type || file.type || "image/jpeg", sizeBytes: stored.size,
+      id, ...meta, cloudFileId, fileName: file.name || "photo.jpg", mimeType: stored.type || file.type || "image/jpeg", sizeBytes: stored.size,
       capturedAt: new Date(file.lastModified || Date.now()).toISOString(),
     });
     const use = await storageUsage();

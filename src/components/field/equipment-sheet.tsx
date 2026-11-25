@@ -17,6 +17,7 @@ import { deletePhotoBlob } from "@/lib/photos/photo-db";
 import { usePhotoUrl } from "@/lib/photos/use-photo-url";
 import { locationLabel } from "@/lib/domain/csv";
 import { MoveToRoomSheet } from "@/components/field/move-room-sheet";
+import { CloudPhotoStatus } from "@/components/field/cloud-photo-status";
 import type { Equipment, Inspection, InspectionResult, InspectionRoomConditions, Photo, ResultException, ResultExceptionKind, ResultOverrides, ThermalImage } from "@/lib/domain/types";
 
 /** Kept for existing imports: next sequential names in a room. */
@@ -126,6 +127,7 @@ function Thumb({ photo, onDelete }: { photo: Photo; onDelete?: () => void }) {
       {/* eslint-disable-next-line @next/next/no-img-element */}
       {url ? <img src={url} alt="Equipment photo" className="h-full w-full object-cover" /> : missing ? <ImageOff className="m-auto mt-7 h-5 w-5 text-slate-400" /> : null}
       {onDelete ? <button type="button" onClick={onDelete} aria-label="Delete photo" className="absolute right-1 top-1 rounded-full bg-slate-900/70 p-1 text-white"><X className="h-3.5 w-3.5" /></button> : null}
+      <div className="absolute inset-x-0 bottom-0 bg-white/90 px-1 leading-tight"><CloudPhotoStatus photo={photo} /></div>
     </div>
   );
 }

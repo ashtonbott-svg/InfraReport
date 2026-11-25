@@ -81,7 +81,7 @@ const photo = (num: string, kind: "IR" | "DAR") => {
 const html = renderInspectionReportHtml(model, {
   logo: asset(logoPath), clientLogo: asset(clientLogoPath), fronts: [{ building: "", src: asset(frontPath) }],
   photos: (e) => ({ ir: photo(e.irNumber, "IR"), visual: photo(e.visualNumber, "DAR") }),
-  draftLabel: "Prototype · Draft for owner review",
+  draft: true,
 });
 writeFileSync(join(outDir, "report.html"), html);
 writeFileSync(join(outDir, "review.json"), JSON.stringify({ conversionNotes: notes, review: model.review, totals: model.totals, counts: model.counts, pagesBySeverity: model.pagesBySeverity, layout: model.layout }, null, 1));

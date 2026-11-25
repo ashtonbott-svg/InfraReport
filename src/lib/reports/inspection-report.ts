@@ -22,6 +22,10 @@ export interface ReportMeta {
   company: { name: string; phone: string; website: string };
   /** Scope exclusions and other statements the reviewer wrote for this report. */
   scopeNotes: string[];
+  /** The inspection's own notes (kept verbatim). */
+  inspectionNotes?: string;
+  /** Areas marked on visual photographs, per thermal image entry: fractions of width/height. */
+  annotations?: Record<string, { x: number; y: number; w: number; h: number }[]>;
 }
 
 export type Assessment =
@@ -55,6 +59,7 @@ export interface ReportEntry {
   notes: string;
   opened: string;
   page: number;
+  annotations: { x: number; y: number; w: number; h: number }[];
 }
 
 export type InventoryStatus =
@@ -98,11 +103,14 @@ const lookup = <T,>(src: Map<string, T> | Record<string, T>, id: string): T | un
 const num = (v: string) => (isNumericText(v) ? Number(v) : null);
 
 /** Text lines that fit on one inventory page; a room heading takes two. */
-export const INVENTORY_LINES_PER_PAGE = 30;
+export const INVENTORY_LINES_PER_PAGE = 27;
 /** Lines one inventory row needs, from the widest wrapped cell (characters per line by column width). */
 const lineUnits = (l: InventoryLine) => Math.max(1,
   Math.ceil(l.equipment.length / 30), Math.ceil(l.components.join(", ").length / 28), Math.ceil(l.imageNumbers.join(", ").length / 12),
   Math.ceil(l.opened.length / 24), Math.ceil(l.notes.length / 18), l.status.kind === "not-evaluated" ? Math.ceil((l.status.reason.length + 16) / 30) : 1);
+
+/** Rows (discrepancies and equipment not evaluated) on one summary page. */
+export const SUMMARY_ROWS_PER_PAGE = 22;
 
 export function assessImage(img: ThermalImage, ambientTemp: string, opened: string = DEFAULT_OPENED): Assessment {
   const cause = img.possibleCause || POSSIBLE_CAUSE_NONE;
@@ -156,6 +164,7 @@ export function buildInspectionReport(ds: ExportDataset, meta: ReportMeta): Insp
         imageDate: formatImageDate(eff.imageDate), humidity: eff.humidity, backgroundTemp: eff.backgroundTemp, ambientTemp: eff.ambientTemp,
         emissivity: eff.emissivity, distance: eff.distance, cause, irNumber: S(img.irImageNumber), visualNumber: S(img.visualImageNumber) || S(img.irImageNumber),
         maxTemp: S(img.maxTemp), assessment, recommendation: recommendation ?? "", notes: [S(img.notes), notes].filter(Boolean).join("; "), opened, page: 0,
+        annotations: meta.annotations?.[img.id] ?? [],
       });
     }
     const mine = entries.filter((e) => e.resultId === r.id);
@@ -175,7 +184,9 @@ export function buildInspectionReport(ds: ExportDataset, meta: ReportMeta): Insp
   // Worst first (severity, then Delta T), then everything else in room and entry order (Generator order).
   const findings = entries.filter((e) => rank(e.assessment) >= 2)
     .sort((a, b) => rank(b.assessment) - rank(a.assessment) || dt(b) - dt(a));
-  const ordered = [...findings, ...entries.filter((e) => rank(e.assessment) < 2)];
+  // Equipment not evaluated (de-energized when imaged) gets no finding page: it is listed once, with
+  // its reason, in the summary and the inventory; its photograph stays in the archive.
+  const ordered = [...findings, ...entries.filter((e) => rank(e.assessment) < 2 && e.assessment.kind !== "not-evaluated")];
 
   const inventory: InventoryRoom[] = [];
   for (const r of results) {
@@ -188,7 +199,9 @@ export function buildInspectionReport(ds: ExportDataset, meta: ReportMeta): Insp
   }
 
   // Layout: cover, how to read + summary, findings overview, entries, inventory.
-  const frontPages = 3;
+  const notEvaluatedCount = [...lines.values()].filter((l) => l.status.kind === "not-evaluated" || l.status.kind === "not-documented").length;
+  const summaryRows = findings.length + notEvaluatedCount;
+  const frontPages = 2 + Math.max(1, Math.ceil(summaryRows / SUMMARY_ROWS_PER_PAGE));
   ordered.forEach((e, i) => { e.page = frontPages + i + 1; lines.get(e.resultId)?.pages.push(e.page); });
   const inventoryPages = paginateInventory(inventory, meta.scopeNotes.length > 0).length;
   const inventoryStart = frontPages + ordered.length + 1;

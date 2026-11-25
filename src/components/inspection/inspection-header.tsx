@@ -33,6 +33,7 @@ export function InspectionHeader({ inspection, errorCount }: { inspection: Inspe
     { href: base, label: "Overview" },
     { href: `${base}/entry`, label: "Equipment Entry" },
     { href: `${base}/review`, label: "Review & Export" },
+    { href: `${base}/photos`, label: "Photographs" },
   ];
 
   const changeStatus = (s: InspectionStatus) => {

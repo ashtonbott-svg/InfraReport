@@ -315,6 +315,8 @@ export interface Photo {
   savedAt: ISODateTime;
   /** Optional note (used for before-opening condition photos). */
   note?: string;
+  /** The original file's cloud upload (photo_files id), when the inspection is shared. */
+  cloudFileId?: string;
 }
 
 export type DocumentKind = "field-notes" | "report" | "workbook" | "other";

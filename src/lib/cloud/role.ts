@@ -25,5 +25,5 @@ export function useRole() {
 
 /** Routes a technician (or an admin in field view) can open. Everything else is administrator-only. */
 export function fieldRouteAllowed(pathname: string) {
-  return pathname === "/jobs" || pathname === "/settings" || pathname === "/sync" || /^\/inspections\/[^/]+(\/(entry|review))?$/.test(pathname) && pathname !== "/inspections/new";
+  return pathname === "/jobs" || pathname === "/settings" || pathname === "/sync" || /^\/inspections\/[^/]+(\/(entry|review|photos))?$/.test(pathname) && pathname !== "/inspections/new";
 }

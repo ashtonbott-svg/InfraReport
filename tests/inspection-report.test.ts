@@ -58,7 +58,8 @@ describe("report model", () => {
     const m = build();
     expect(m.entries.map((e) => `${e.page}:${e.equipment}/${e.component}`)).toEqual([
       // A visual finding has no severity until the reviewer sets one: it is shown above Potential.
-      "4:Panel P4/Circuit 39", "5:Cover/Full Panel", "6:Switchboard/Section 2", "7:Panel L1/Full Panel", "8:Switchboard/Section 1", "9:Cabinet/Full Panel",
+      "4:Panel P4/Circuit 39", "5:Cover/Full Panel", "6:Switchboard/Section 2", "7:Panel L1/Full Panel", "8:Switchboard/Section 1",
+      // Cabinet was imaged while off: no finding page, listed as not evaluated.
     ]);
     expect(m.counts).toEqual({ normal: 2, potential: 1, serious: 1, critical: 0, visualFindings: 1 });
     expect(m.pagesBySeverity).toEqual({ normal: [7, 8], potential: [6], serious: [4], critical: [] });
@@ -71,7 +72,7 @@ describe("report model", () => {
       "Panel L1": "normal", Switchboard: "potential", "Panel P4": "serious", "Disconnect 1": "not evaluated: Equipment Off", Cabinet: "not evaluated: Equipment Off",
       "Transformer P5": "not evaluated: Unable to Open", "Transformer 2": "not-documented", Cover: "visual-finding",
     });
-    expect(m.totals).toMatchObject({ equipment: 8, notEvaluated: 3, notDocumented: 1, images: 6 });
+    expect(m.totals).toMatchObject({ equipment: 8, notEvaluated: 3, notDocumented: 1, images: 5 });
   });
 
   it("the reviewer is told about every gap instead of the report inventing values", () => {
@@ -86,7 +87,7 @@ describe("report model", () => {
     const m = build();
     const html = renderInspectionReportHtml(m, { logo: "l.png", fronts: [], photos: () => ({}) });
     expect((html.match(/class="page"/g) ?? []).length).toBe(m.layout.totalPages);
-    expect(html).toContain("Thermal Image #80 not uploaded yet");
+    expect(html).toContain("Thermal image 80 not uploaded");
     const rooms = Array.from({ length: 3 }, (_, i) => ({ roomId: `r${i}`, room: `Room ${i}`, lines: Array.from({ length: 20 }, (_, j) => ({ resultId: `${i}-${j}`, equipment: `<Item ${j}>`, components: ["Full Panel"], imageNumbers: ["1"], opened: "Yes, Completely", status: { kind: "severity" as const, severity: "normal" as const }, notes: "", pages: [1] })) }));
     const pages = paginateInventory(rooms, true);
     expect(pages.flat().flatMap((b) => b.lines).length).toBe(60);
